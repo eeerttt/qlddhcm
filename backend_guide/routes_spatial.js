@@ -1,0 +1,540 @@
+
+import express from 'express';
+import multer from 'multer';
+import shp from 'shpjs';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { authenticateToken } from './middleware_auth.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Đảm bảo thư mục uploads tồn tại
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const upload = multer({ dest: uploadDir });
+
+// Bộ nhớ đệm cho cấu trúc bảng và SRID (Schema Cache)
+const SCHEMA_CACHE = new Map();
+
+export default function(pool, logSystemAction) {
+    const router = express.Router();
+
+    const COLUMN_VARIANTS = {
+        sodoto: ['shbando', 'sh_ban_do', 'tobando', 'to_ban_do', 'map_sheet', 'shmap', 'sodoto', 'so_to'],
+        sothua: ['shthua', 'sh_thua', 'thua_dat', 'parcel_no', 'shparcel', 'so_thu_tu_thua', 'sothua', 'so_thua'],
+        loaidat: ['kyhieumucd', 'ky_hieu_muc_dich', 'mucdich', 'mdsd', 'kh_mucdich', 'purpose', 'loaidat', 'loai_dat'],
+        tenchu: ['tenchu', 'ten_chu', 'chu_so_huu', 'ten_chu_sd', 'owner', 'owner_name', 'chusudung'],
+        diachi: ['diachi', 'dia_chi', 'vitri', 'vi_tri', 'address', 'location', 'khu_vuc'],
+        dientich: ['dientich', 'dien_tich', 'dt_phaply', 'area', 'shape_area', 'st_area'],
+        image_url: ['image_url', 'imageurl', 'hinh_anh', 'hinhanh', 'photo', 'picture']
+    };
+
+    /**
+     * Hàm tìm tên cột và SRID hiện tại của bảng
+     */
+    const resolveTableColumns = async (tableName) => {
+        if (SCHEMA_CACHE.has(tableName)) {
+            return SCHEMA_CACHE.get(tableName);
+        }
+
+        try {
+            // Lấy danh sách cột
+            const res = await pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = $1
+            `, [tableName]);
+            
+            // Lấy SRID hiện tại của cột geometry
+            const sridRes = await pool.query(`
+                SELECT srid FROM geometry_columns 
+                WHERE f_table_name = $1 AND f_geometry_column = 'geometry'
+                LIMIT 1
+            `, [tableName]);
+
+            const currentSrid = sridRes.rows[0]?.srid || 4326;
+            
+            const dbColsMap = {};
+            res.rows.forEach(r => {
+                dbColsMap[r.column_name.toLowerCase()] = r.column_name;
+            });
+            
+            const mapping = { _srid: currentSrid };
+            for (const [standardKey, candidates] of Object.entries(COLUMN_VARIANTS)) {
+                let foundCol = null;
+                for (const candidate of candidates) {
+                    if (dbColsMap[candidate]) {
+                        foundCol = dbColsMap[candidate];
+                        break;
+                    }
+                }
+                mapping[standardKey] = foundCol;
+            }
+            
+            SCHEMA_CACHE.set(tableName, mapping);
+            return mapping;
+        } catch (e) {
+            console.error(`Error resolving columns for ${tableName}:`, e);
+            return { sodoto: null, sothua: null, loaidat: null, tenchu: null, diachi: null, dientich: null, image_url: null, _srid: 4326 };
+        }
+    };
+
+    const syncTableSchema = async (tableName) => {
+        try {
+            SCHEMA_CACHE.delete(tableName);
+            const currentMap = await resolveTableColumns(tableName);
+            const res = await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_name = $1`, [tableName]);
+            if (res.rows.length === 0) return; // Bảng không tồn tại vật lý
+
+            const existingCols = res.rows.map(r => r.column_name.toLowerCase());
+
+            // 1. Kiểm tra thiếu cột thuộc tính
+            const missingCols = [];
+            if (currentMap.sodoto && !existingCols.includes(currentMap.sodoto.toLowerCase())) missingCols.push({ name: currentMap.sodoto, type: 'TEXT' });
+            if (currentMap.sothua && !existingCols.includes(currentMap.sothua.toLowerCase())) missingCols.push({ name: currentMap.sothua, type: 'TEXT' });
+            if (currentMap.loaidat && !existingCols.includes(currentMap.loaidat.toLowerCase())) missingCols.push({ name: currentMap.loaidat, type: 'TEXT' });
+            if (currentMap.dientich && !existingCols.includes(currentMap.dientich.toLowerCase())) missingCols.push({ name: currentMap.dientich, type: 'NUMERIC' });
+            if (currentMap.image_url && !existingCols.includes(currentMap.image_url.toLowerCase())) missingCols.push({ name: currentMap.image_url, type: 'TEXT' });
+
+            // Nếu các cột chuẩn hoàn toàn không có trong mapping (null), ta có thể ép thêm các cột mặc định nếu muốn
+            if (!currentMap.sodoto && !existingCols.includes('sodoto')) missingCols.push({ name: 'sodoto', type: 'TEXT' });
+            if (!currentMap.sothua && !existingCols.includes('sothua')) missingCols.push({ name: 'sothua', type: 'TEXT' });
+            if (!currentMap.loaidat && !existingCols.includes('loaidat')) missingCols.push({ name: 'loaidat', type: 'TEXT' });
+            if (!currentMap.tenchu && !existingCols.includes('tenchu')) missingCols.push({ name: 'tenchu', type: 'TEXT' });
+            if (!currentMap.diachi && !existingCols.includes('diachi')) missingCols.push({ name: 'diachi', type: 'TEXT' });
+            if (!currentMap.dientich && !existingCols.includes('dientich')) missingCols.push({ name: 'dientich', type: 'NUMERIC' });
+            if (!currentMap.image_url && !existingCols.includes('image_url')) missingCols.push({ name: 'image_url', type: 'TEXT' });
+
+            if (missingCols.length > 0) {
+                for (const col of missingCols) {
+                    await pool.query(`ALTER TABLE "${tableName}" ADD COLUMN IF NOT EXISTS "${col.name}" ${col.type}`);
+                }
+            }
+
+            // 2. Tự động sửa SRID 4326 -> 9210 nếu cần
+            if (currentMap._srid !== 9210) {
+                try {
+                    await pool.query(`
+                        ALTER TABLE "${tableName}" 
+                        ALTER COLUMN geometry TYPE geometry(Geometry, 9210) 
+                        USING ST_SetSRID(geometry, 9210)
+                    `);
+                    console.log(`[Migrate] Forced SRID 9210 for table: ${tableName}`);
+                } catch (err) {
+                    console.warn(`[Migrate Skip] Could not force SRID 9210 for ${tableName}`);
+                }
+            }
+
+            await pool.query(`CREATE INDEX IF NOT EXISTS "${tableName}_geom_idx" ON "${tableName}" USING GIST (geometry)`);
+            SCHEMA_CACHE.delete(tableName); 
+        } catch (e) {
+            console.error(`[Schema Sync] Error syncing table ${tableName}:`, e.message);
+        }
+    };
+
+    router.get('/spatial-tables', async (req, res) => {
+        try {
+            const result = await pool.query(`SELECT * FROM spatial_tables_registry ORDER BY created_at DESC`);
+            res.json(result.rows);
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    router.post('/spatial-tables/sync/:table', authenticateToken, async (req, res) => {
+        const { table } = req.params;
+        try {
+            await syncTableSchema(table);
+            await logSystemAction(req, 'SYNC_TABLE', `Đồng bộ cấu trúc bảng: ${table}`);
+            res.json({ status: 'ok' });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    router.post('/spatial-tables', authenticateToken, async (req, res) => {
+        const { tableName, displayName, description } = req.body;
+        const safeName = tableName.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+        try {
+            await pool.query('BEGIN');
+            await pool.query(`
+                CREATE TABLE IF NOT EXISTS "${safeName}" (
+                    gid SERIAL PRIMARY KEY,
+                    sodoto TEXT, sothua TEXT, tenchu TEXT, diachi TEXT, loaidat TEXT, dientich NUMERIC,
+                    image_url TEXT,
+                    geometry GEOMETRY(Geometry, 9210),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+            await pool.query(`CREATE INDEX IF NOT EXISTS "${safeName}_geom_idx" ON "${safeName}" USING GIST (geometry)`);
+            await pool.query(`
+                INSERT INTO spatial_tables_registry (table_name, display_name, description) VALUES ($1, $2, $3)
+                ON CONFLICT (table_name) DO UPDATE SET display_name = EXCLUDED.display_name
+            `, [safeName, displayName, description]);
+            
+            await syncTableSchema(safeName);
+            await pool.query('COMMIT');
+            res.json({ status: 'ok', tableName: safeName });
+        } catch (e) { await pool.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+    });
+
+    router.post('/spatial-tables/link', authenticateToken, async (req, res) => {
+        const { tableName, displayName, description } = req.body;
+        try {
+            const check = await pool.query(`SELECT to_regclass($1) as exists`, [tableName]);
+            if (!check.rows[0].exists) throw new Error(`Bảng ${tableName} không tồn tại vật lý trong Database.`);
+            await pool.query(`
+                INSERT INTO spatial_tables_registry (table_name, display_name, description) VALUES ($1, $2, $3)
+                ON CONFLICT (table_name) DO UPDATE SET display_name = EXCLUDED.display_name, description = EXCLUDED.description
+            `, [tableName, displayName, description]);
+            
+            await syncTableSchema(tableName);
+            res.json({ status: 'ok' });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    router.post('/spatial-tables/rename', authenticateToken, async (req, res) => {
+        const { oldName, newName, displayName, description, renamePhysical } = req.body;
+        try {
+            await pool.query('BEGIN');
+            
+            // Nếu người dùng yêu cầu đổi tên vật lý VÀ tên có thay đổi
+            if (renamePhysical && oldName !== newName) {
+                const check = await pool.query(`SELECT to_regclass($1) as exists`, [oldName]);
+                if (check.rows[0].exists) {
+                    await pool.query(`ALTER TABLE "${oldName}" RENAME TO "${newName}"`);
+                }
+            }
+
+            // Luôn cập nhật Registry
+            await pool.query(`
+                UPDATE spatial_tables_registry 
+                SET table_name = $1, display_name = $2, description = $3 
+                WHERE table_name = $4
+            `, [newName, displayName, description, oldName]);
+            
+            await pool.query('COMMIT');
+            SCHEMA_CACHE.delete(oldName);
+            SCHEMA_CACHE.delete(newName);
+            res.json({ status: 'ok' });
+        } catch (e) {
+            await pool.query('ROLLBACK');
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    router.post('/spatial-tables/unlink', authenticateToken, async (req, res) => {
+        const { tableName } = req.body;
+        try {
+            await pool.query(`DELETE FROM spatial_tables_registry WHERE table_name = $1`, [tableName]);
+            SCHEMA_CACHE.delete(tableName);
+            res.json({ status: 'ok' });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    router.get('/data/:table', async (req, res) => {
+        const table = req.params.table.toLowerCase();
+        const { sodoto, sothua, tenchu, diachi } = req.query;
+        try {
+            const cols = await resolveTableColumns(table);
+            
+            const selectFields = ['gid'];
+            const params = [];
+            let idx = 1;
+
+            const addSelectField = (key) => {
+                if (cols[key]) {
+                    selectFields.push(`"${cols[key]}" as ${key}`);
+                }
+            };
+
+            addSelectField('sodoto');
+            addSelectField('sothua');
+            addSelectField('tenchu');
+            addSelectField('diachi');
+            addSelectField('loaidat');
+            addSelectField('dientich');
+            addSelectField('image_url');
+            
+            selectFields.push('ST_AsGeoJSON(geometry) as geometry');
+
+            let query = `SELECT ${selectFields.join(', ')} FROM "${table}" WHERE 1=1`;
+
+            if (sodoto && cols.sodoto) { query += ` AND "${cols.sodoto}"::text = $${idx++}`; params.push(sodoto); }
+            if (sothua && cols.sothua) { query += ` AND "${cols.sothua}"::text = $${idx++}`; params.push(sothua); }
+            if (tenchu && cols.tenchu) { query += ` AND "${cols.tenchu}" ILIKE $${idx++}`; params.push(`%${tenchu}%`); }
+            if (diachi && cols.diachi) { query += ` AND "${cols.diachi}" ILIKE $${idx++}`; params.push(`%${diachi}%`); }
+            
+            query += ` ORDER BY gid DESC LIMIT 100`;
+
+            const result = await pool.query(query, params);
+            res.json(result.rows.map(row => ({
+                ...row,
+                geometry: row.geometry ? JSON.parse(row.geometry) : null
+            })));
+        } catch (e) {
+            SCHEMA_CACHE.delete(table);
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    router.post('/data/:table', authenticateToken, async (req, res) => {
+        const table = req.params.table.toLowerCase();
+        const data = req.body;
+        try {
+            const cols = await resolveTableColumns(table);
+            const targetSrid = cols._srid || 4326;
+
+            const fields = [];
+            const placeholders = [];
+            const params = [];
+            let idx = 1;
+
+            const addField = (key, value) => {
+                if (cols[key]) {
+                    fields.push(`"${cols[key]}"`);
+                    placeholders.push(`$${idx}`);
+                    params.push(value);
+                    idx++;
+                }
+            };
+
+            addField('sodoto', data.sodoto);
+            addField('sothua', data.sothua);
+            addField('tenchu', data.tenchu);
+            addField('diachi', data.diachi);
+            addField('loaidat', data.loaidat);
+            addField('dientich', data.dientich);
+            addField('image_url', data.image_url);
+
+            if (data.geometry) {
+                fields.push('geometry');
+                placeholders.push(`ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($${idx}), ${targetSrid}))`);
+                params.push(JSON.stringify(data.geometry));
+                idx++;
+            }
+
+            if (fields.length === 0) return res.status(400).json({ error: "Không có dữ liệu hợp lệ để chèn." });
+
+            const query = `INSERT INTO "${table}" (${fields.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING gid`;
+            const result = await pool.query(query, params);
+            res.json({ status: 'ok', gid: result.rows[0].gid });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    router.post('/data/:table/bulk', authenticateToken, async (req, res) => {
+        const table = req.params.table.toLowerCase();
+        const { items } = req.body;
+        if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: "Dữ liệu không hợp lệ." });
+        try {
+            const cols = await resolveTableColumns(table);
+            const targetSrid = cols._srid || 4326;
+            await pool.query('BEGIN');
+            for (const item of items) {
+                const fields = [];
+                const placeholders = [];
+                const params = [];
+                let idx = 1;
+
+                const addField = (key, value) => {
+                    if (cols[key]) {
+                        fields.push(`"${cols[key]}"`);
+                        placeholders.push(`$${idx}`);
+                        params.push(value);
+                        idx++;
+                    }
+                };
+
+                addField('sodoto', item.sodoto);
+                addField('sothua', item.sothua);
+                addField('tenchu', item.tenchu);
+                addField('diachi', item.diachi);
+                addField('loaidat', item.loaidat);
+                addField('dientich', item.dientich);
+                addField('image_url', item.image_url);
+
+                if (item.geometry) {
+                    fields.push('geometry');
+                    placeholders.push(`ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($${idx}), ${targetSrid}))`);
+                    params.push(JSON.stringify(item.geometry));
+                    idx++;
+                }
+
+                if (fields.length > 0) {
+                    const query = `INSERT INTO "${table}" (${fields.join(', ')}) VALUES (${placeholders.join(', ')})`;
+                    await pool.query(query, params);
+                }
+            }
+            await pool.query('COMMIT');
+            await logSystemAction(req, 'BULK_IMPORT', `Nạp hàng loạt ${items.length} thửa đất vào bảng ${table}`);
+            res.json({ status: 'ok', count: items.length });
+        } catch (e) { await pool.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+    });
+
+    router.put('/data/:table/:gid', authenticateToken, async (req, res) => {
+        const table = req.params.table.toLowerCase();
+        const { gid } = req.params;
+        const data = req.body;
+        try {
+            const cols = await resolveTableColumns(table);
+            const targetSrid = cols._srid || 4326;
+
+            const updates = [];
+            const params = [];
+            let idx = 1;
+
+            const addField = (key, value) => {
+                if (cols[key]) {
+                    updates.push(`"${cols[key]}"=$${idx}`);
+                    params.push(value);
+                    idx++;
+                }
+            };
+
+            addField('sodoto', data.sodoto);
+            addField('sothua', data.sothua);
+            addField('tenchu', data.tenchu);
+            addField('diachi', data.diachi);
+            addField('loaidat', data.loaidat);
+            addField('dientich', data.dientich);
+            addField('image_url', data.image_url);
+
+            if (data.geometry) {
+                updates.push(`geometry=ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($${idx}), ${targetSrid}))`);
+                params.push(JSON.stringify(data.geometry));
+                idx++;
+            }
+
+            if (updates.length === 0) return res.status(400).json({ error: "Không có dữ liệu hợp lệ để cập nhật." });
+
+            const query = `UPDATE "${table}" SET ${updates.join(', ')} WHERE gid=$${idx}`;
+            params.push(gid);
+            await pool.query(query, params);
+            res.json({ status: 'ok' });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    router.post('/data/:table/upload', authenticateToken, upload.fields([{ name: 'file', maxCount: 1 }, { name: 'imageFile', maxCount: 1 }]), async (req, res) => {
+        const table = req.params.table.toLowerCase();
+        console.log(`[Upload] Starting upload for table: ${table}`);
+        const files = req.files;
+        const file = files?.file?.[0];
+        const imageFile = files?.imageFile?.[0];
+        
+        console.log(`[Upload] Files received: ${Object.keys(files || {}).length}`);
+        if (file) console.log(`[Upload] Main file: ${file.originalname} (${file.size} bytes)`);
+        if (imageFile) console.log(`[Upload] Image file: ${imageFile.originalname} (${imageFile.size} bytes)`);
+
+        let data = req.body; 
+        
+        // Nếu có imageFile, lưu đường dẫn và xóa file tạm
+        if (imageFile) {
+            const ext = path.extname(imageFile.originalname);
+            const newFileName = `parcel_${Date.now()}${ext}`;
+            const targetPath = path.join(uploadDir, newFileName);
+            console.log(`[Upload] Moving image file to: ${targetPath}`);
+            try {
+                fs.renameSync(imageFile.path, targetPath);
+            } catch (err) {
+                console.warn(`[Upload] renameSync failed, trying copy + unlink: ${err.message}`);
+                // Nếu renameSync lỗi (ví dụ khác filesystem), dùng copy + unlink
+                fs.copyFileSync(imageFile.path, targetPath);
+                fs.unlinkSync(imageFile.path);
+            }
+            data.image_url = `/uploads/${newFileName}`;
+        }
+
+        try {
+            const cols = await resolveTableColumns(table);
+            console.log(`[Upload] Table columns resolved:`, cols);
+            const targetSrid = cols._srid || 4326;
+            
+            let geometry = null;
+            if (file) {
+                const buffer = fs.readFileSync(file.path);
+                console.log(`[Upload] Reading file buffer, size: ${buffer.length}`);
+                let geojson;
+                if (file.originalname.endsWith('.zip')) {
+                    console.log(`[Upload] Parsing SHP ZIP...`);
+                    geojson = await shp(buffer);
+                } else {
+                    console.log(`[Upload] Parsing JSON...`);
+                    geojson = JSON.parse(buffer.toString());
+                }
+                console.log(`[Upload] GeoJSON parsed successfully`);
+                
+                if (Array.isArray(geojson)) geometry = geojson[0]?.features[0]?.geometry;
+                else if (geojson.type === 'FeatureCollection') geometry = geojson.features[0]?.geometry;
+                else if (geojson.type === 'Feature') geometry = geojson.geometry;
+                else geometry = geojson;
+                
+                fs.unlinkSync(file.path);
+            }
+
+            const fields = [];
+            const placeholders = [];
+            const params = [];
+            let idx = 1;
+
+            const addField = (key, value) => {
+                if (cols[key]) {
+                    fields.push(`"${cols[key]}"`);
+                    placeholders.push(`$${idx}`);
+                    params.push(value);
+                    idx++;
+                }
+            };
+
+            addField('sodoto', data.sodoto);
+            addField('sothua', data.sothua);
+            addField('tenchu', data.tenchu);
+            addField('diachi', data.diachi);
+            addField('loaidat', data.loaidat);
+            addField('dientich', data.dientich);
+            addField('image_url', data.image_url);
+
+            if (geometry) {
+                fields.push('geometry');
+                placeholders.push(`ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($${idx}), ${targetSrid}))`);
+                params.push(JSON.stringify(geometry));
+                idx++;
+            }
+
+            if (data.gid) {
+                const updates = fields.map((f, i) => `${f}=${placeholders[i]}`).join(', ');
+                const query = `UPDATE "${table}" SET ${updates} WHERE gid=$${idx}`;
+                params.push(data.gid);
+                await pool.query(query, params);
+            } else {
+                if (fields.length === 0) return res.status(400).json({ error: "Không có dữ liệu hợp lệ để chèn." });
+                const query = `INSERT INTO "${table}" (${fields.join(', ')}) VALUES (${placeholders.join(', ')})`;
+                await pool.query(query, params);
+            }
+            res.json({ status: 'ok', image_url: data.image_url });
+        } catch (e) {
+            if (file && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+            if (imageFile && fs.existsSync(imageFile.path)) fs.unlinkSync(imageFile.path);
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    router.get('/data/:table/extent', async (req, res) => {
+        const table = req.params.table.toLowerCase();
+        try {
+            const result = await pool.query(`SELECT ST_XMin(ext) as xmin, ST_YMin(ext) as ymin, ST_XMax(ext) as xmax, ST_YMax(ext) as ymax FROM (SELECT ST_Extent(geometry) as ext FROM "${table}") as t`);
+            res.json(result.rows[0]);
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    router.delete('/data/:table/:gid', authenticateToken, async (req, res) => {
+        const table = req.params.table.toLowerCase();
+        const { gid } = req.params;
+        try {
+            await pool.query(`DELETE FROM "${table}" WHERE gid=$1`, [gid]);
+            res.json({ status: 'ok' });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    return router;
+}

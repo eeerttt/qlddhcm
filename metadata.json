@@ -1,0 +1,7 @@
+{
+  "name": "QLDDHCM",
+  "description": "Professional WebGIS for Land Management with Real-time Dashboard, PostGIS logic, and Role-Based Access Control.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}

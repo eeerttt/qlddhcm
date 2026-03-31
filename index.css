@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Exo 2", sans-serif;
+
+  --color-space-900: #0B0C10;
+  --color-space-800: #1F2833;
+  --color-space-light: #C5C6C7;
+  --color-space-neon: #66FCF1;
+  --color-space-accent: #45A29E;
+  --color-space-purple: #b026ff;
+
+  --animate-float: float 6s ease-in-out infinite;
+  --animate-pulse-slow: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-mesh: mesh 10s ease infinite;
+  --animate-reveal-up: revealUp 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-reveal-left: revealLeft 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-orb-move: orbMove 25s infinite alternate;
+  --animate-particle: particle 15s linear infinite;
+  --animate-shimmer: shimmer 2s infinite linear;
+
+  @keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(300%); }
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-20px); }
+  }
+  @keyframes mesh {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  @keyframes revealUp {
+    0% { opacity: 0; transform: translateY(40px) scale(0.98); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes revealLeft {
+    0% { opacity: 0; transform: translateX(-40px); }
+    100% { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes orbMove {
+    0% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(15%, 10%) scale(1.2); }
+    100% { transform: translate(-10%, 20%) scale(0.8); }
+  }
+  @keyframes particle {
+    0% { transform: translateY(0) rotate(0deg); opacity: 0; }
+    10% { opacity: 0.5; }
+    90% { opacity: 0.5; }
+    100% { transform: translateY(-1000px) rotate(720deg); opacity: 0; }
+  }
+}
+
+body {
+  background-color: #0B0C10;
+  color: #C5C6C7;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #0B0C10; }
+::-webkit-scrollbar-thumb { background: #1f2833; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #45A29E; }
+
+.mesh-bg {
+  background: linear-gradient(-45deg, #0b0c10, #131d27, #1f2833, #0b0c10, #231f33);
+  background-size: 400% 400%;
+}
+
+/* Ẩn các nút mặc định của OpenLayers để dùng nút Custom đẹp hơn */
+.ol-zoom, .ol-rotate, .ol-attribution {
+  display: none !important;
+}
+
+.particle-layer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Đảm bảo font hiển thị đều trên các trình duyệt */
+input, select, textarea, button {
+  font-family: inherit;
+}

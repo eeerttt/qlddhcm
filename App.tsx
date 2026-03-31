@@ -1,0 +1,268 @@
+
+import React, { useState, useEffect, Suspense, lazy } from 'react';
+import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
+import Sidebar from './components/Sidebar';
+import Login from './pages/Login';
+import { User, UserRole, SystemSetting } from './types';
+import { ShieldAlert, RefreshCw, WifiOff } from 'lucide-react';
+import { adminService, authService } from './services/mockBackend';
+
+// Lazy Load các trang để tối ưu tốc độ tải bundle ban đầu
+const MapPage = lazy(() => import('./pages/MapPage'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const AdminPage = lazy(() => import('./pages/AdminPage'));
+const UserProfile = lazy(() => import('./pages/UserProfile'));
+const Messaging = lazy(() => import('./pages/Messaging'));
+const QRGenerator = lazy(() => import('./components/tools/QRGenerator'));
+const EditorPage = lazy(() => import('./pages/EditorPage'));
+const LandPriceLookup = lazy(() => import('./pages/LandPriceLookup'));
+
+const PageLoader = () => (
+    <div className="h-full w-full bg-slate-900/50 backdrop-blur-sm flex flex-col items-center justify-center text-white gap-4 animate-in fade-in duration-300">
+        <div className="relative">
+            <RefreshCw className="animate-spin text-blue-500" size={40} />
+            <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-1.5 h-1.5 bg-white rounded-full animate-ping"></div>
+            </div>
+        </div>
+        <p className="font-display uppercase tracking-[0.3em] text-[9px] text-blue-400 font-black animate-pulse">
+            Đang nạp Module hệ thống...
+        </p>
+    </div>
+);
+
+// Bản đồ ánh xạ giữa ID Menu và URL Path
+const PATH_MAPPING: Record<string, string> = {
+    'map': '/',
+    'dashboard': '/dashboard',
+    'editor': '/editor',
+    'profile': '/profile',
+    'messaging': '/messages',
+    'qr-generator': '/tools/qr',
+    'land-price': '/land-price',
+    'admin': '/admin'
+};
+
+// Bản đồ ngược để highlight Sidebar dựa trên URL
+const REVERSE_PATH_MAPPING: Record<string, string> = Object.entries(PATH_MAPPING).reduce((acc, [key, value]) => {
+    acc[value] = key;
+    return acc;
+}, {} as Record<string, string>);
+
+const App: React.FC = () => {
+  const [user, setUser] = useState<User | null>(null);
+  const [showLogin, setShowLogin] = useState(false);
+  const [resetToken, setResetToken] = useState<string | null>(null);
+  const [verificationToken, setVerificationToken] = useState<string | null>(null);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(window.innerWidth < 768);
+  const [systemSettings, setSystemSettings] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [bootError, setBootError] = useState<string | null>(null);
+
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Xác định activePage cho Sidebar dựa trên URL hiện tại
+  const currentPath = location.pathname === '/' ? '/' : `/${location.pathname.split('/')[1]}`;
+  const activePage = REVERSE_PATH_MAPPING[currentPath] || 
+                     (location.pathname.startsWith('/admin') ? 'admin' : 
+                     (location.pathname.startsWith('/tools/qr') ? 'qr-generator' : 'map'));
+
+  const boot = async () => {
+      setLoading(true);
+      setBootError(null);
+      
+      const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Server không phản hồi kịp lúc (Timeout)")), 12000)
+      );
+
+      try {
+          const loadDataPromise = (async () => {
+              const settings: SystemSetting[] = await adminService.getSettings();
+              const settingsMap: Record<string, string> = {};
+              settings.forEach(s => settingsMap[s.key] = s.value);
+              
+              const savedUser = localStorage.getItem('geo_user');
+              if (savedUser && savedUser !== 'undefined' && savedUser !== 'null') {
+                  let localUser: any;
+                  try { localUser = JSON.parse(savedUser); } catch { localStorage.removeItem('geo_user'); return { settingsMap, user: null }; }
+                  try {
+                      const freshUser = await authService.getProfile(localUser.id);
+                      if (freshUser) return { settingsMap, user: { ...localUser, ...freshUser } };
+                  } catch (e) { return { settingsMap, user: localUser }; }
+              }
+              return { settingsMap, user: null };
+          })();
+
+          const result: any = await Promise.race([loadDataPromise, timeoutPromise]);
+          
+          setSystemSettings(result.settingsMap);
+          if (result.user) {
+              setUser(result.user);
+              localStorage.setItem('geo_user', JSON.stringify(result.user));
+          }
+          
+          if (result.settingsMap['system_name']) document.title = result.settingsMap['system_name'];
+          
+          if (result.settingsMap['site_favicon']) {
+              const favicon = document.getElementById('favicon') as HTMLLinkElement;
+              if (favicon) {
+                  favicon.href = result.settingsMap['site_favicon'];
+              }
+          }
+      } catch (e: any) {
+          console.error("Khởi động thất bại:", e.message);
+          setBootError(e.message || "Không thể kết nối đến máy chủ API.");
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  useEffect(() => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('token')) { setResetToken(params.get('token')); setShowLogin(true); }
+      if (params.get('verificationToken')) { setVerificationToken(params.get('verificationToken')); setShowLogin(true); }
+      boot();
+
+      const handleResize = () => {
+          if (window.innerWidth < 768) {
+              setIsSidebarCollapsed(true);
+          } else {
+              setIsSidebarCollapsed(false);
+          }
+      };
+      window.addEventListener('resize', handleResize);
+      return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const handleLogin = (loggedInUser: User) => {
+    setUser(loggedInUser);
+    localStorage.setItem('geo_user', JSON.stringify(loggedInUser));
+    setShowLogin(false);
+    setResetToken(null);
+    setVerificationToken(null);
+    // Điều hướng dựa trên role sau khi login
+    navigate(loggedInUser.role === UserRole.ADMIN ? '/admin' : '/dashboard');
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    localStorage.removeItem('geo_user');
+    navigate('/');
+  };
+
+  const handleNavigate = (pageId: string) => {
+      const path = PATH_MAPPING[pageId];
+      if (path) {
+          navigate(path);
+      }
+  };
+
+  // Protected Route Wrapper
+  const ProtectedRoute = ({ children, requiredRole }: { children?: React.ReactNode, requiredRole?: UserRole }) => {
+      if (!user) return <Navigate to="/" replace />;
+      if (requiredRole && user.role !== requiredRole && user.role !== UserRole.ADMIN) {
+          return <Navigate to="/" replace />;
+      }
+      return <>{children}</>;
+  };
+
+  if (bootError) return (
+      <div className="h-screen w-full bg-slate-950 flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-500">
+          <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mb-6 border border-red-500/30">
+              <WifiOff className="text-red-500" size={40} />
+          </div>
+          <h1 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Cảnh báo hệ thống</h1>
+          <p className="text-slate-400 max-w-md text-sm mb-8 leading-relaxed">
+              {bootError === "Server không phản hồi kịp lúc (Timeout)" 
+                ? "Máy chủ đang gặp tình trạng quá tải hoặc kết nối Internet của bạn không ổn định." 
+                : bootError}
+          </p>
+          <button 
+            onClick={boot}
+            className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-2xl font-black uppercase text-xs tracking-widest shadow-lg shadow-blue-900/20 transition-all active:scale-95 flex items-center gap-2"
+          >
+              <RefreshCw size={16}/> Thử kết nối lại
+          </button>
+      </div>
+  );
+
+  if (loading) return (
+      <div className="h-screen w-full bg-slate-900 flex flex-col items-center justify-center text-white gap-4">
+          <div className="relative">
+              <RefreshCw className="animate-spin text-blue-500" size={48} />
+              <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-2 h-2 bg-white rounded-full animate-ping"></div>
+              </div>
+          </div>
+          <p className="font-display uppercase tracking-[0.3em] text-[10px] text-blue-400 font-black animate-pulse">GeoMaster Engine Loading...</p>
+      </div>
+  );
+
+  if (showLogin) return (
+      <Login 
+        onLogin={handleLogin} 
+        onCancel={() => { setShowLogin(false); setResetToken(null); setVerificationToken(null); }}
+        systemName={systemSettings['system_name']}
+        logoUrl={systemSettings['site_logo']}
+        footerText={systemSettings['footer_text']}
+        allowRegistration={systemSettings['allow_registration'] === 'true'}
+        initialToken={resetToken}
+        verificationToken={verificationToken}
+      />
+  );
+
+  if (systemSettings['maintenance_mode'] === 'true' && user?.role !== UserRole.ADMIN) return (
+      <div className="h-screen w-full bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
+          <ShieldAlert className="text-orange-500 mb-6" size={64} />
+          <h1 className="text-3xl font-display font-bold text-white mb-2 uppercase tracking-tighter">Hệ thống bảo trì</h1>
+          <p className="text-slate-500 text-sm">Chúng tôi đang nâng cấp hệ thống để phục vụ tốt hơn.</p>
+          <button onClick={() => setShowLogin(true)} className="text-blue-500 hover:underline mt-8 font-bold text-xs uppercase tracking-widest">Dành cho Quản trị viên</button>
+      </div>
+  );
+
+  return (
+    <div className="flex h-screen w-full bg-gray-900 overflow-hidden font-sans relative">
+      {!location.pathname.startsWith('/admin') && (
+        <Sidebar 
+          user={user} 
+          activePage={activePage} 
+          onNavigate={handleNavigate} 
+          onLogout={handleLogout}
+          onLoginClick={() => setShowLogin(true)}
+          onCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          isCollapsed={isSidebarCollapsed}
+          systemName={systemSettings['system_name']}
+          logoUrl={systemSettings['site_logo']}
+        />
+      )}
+      <main className={`flex-1 h-full relative overflow-hidden bg-gray-100 flex flex-col transition-all ${location.pathname.startsWith('/admin') ? 'w-full' : ''}`}>
+        <Suspense fallback={<PageLoader />}>
+            <Routes>
+                <Route path="/" element={<MapPage user={user} systemSettings={systemSettings} />} />
+                <Route path="/land-price" element={<LandPriceLookup />} />
+                <Route path="/tools/qr" element={<QRGenerator />} />
+                
+                {/* Protected Routes */}
+                <Route path="/dashboard" element={<ProtectedRoute><Dashboard user={user!} /></ProtectedRoute>} />
+                <Route path="/editor" element={<ProtectedRoute><EditorPage user={user!} /></ProtectedRoute>} />
+                <Route path="/profile" element={<ProtectedRoute><UserProfile user={user!} onUpdateUser={u => { setUser(u); localStorage.setItem('geo_user', JSON.stringify(u)); }} /></ProtectedRoute>} />
+                <Route path="/messages" element={<ProtectedRoute><Messaging user={user!} /></ProtectedRoute>} />
+                
+                {/* Admin Route */}
+                <Route path="/admin" element={
+                    <ProtectedRoute requiredRole={UserRole.ADMIN}>
+                        <AdminPage systemName={systemSettings['system_name']} logoUrl={systemSettings['site_logo']} />
+                    </ProtectedRoute>
+                } />
+                
+                {/* Fallback */}
+                <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+        </Suspense>
+      </main>
+    </div>
+  );
+};
+
+export default App;

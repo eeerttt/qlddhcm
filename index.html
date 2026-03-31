@@ -1,0 +1,95 @@
+
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <!-- PRIMARY META TAGS -->
+    <title>GeoMaster - Tra Cứu Quy Hoạch & Bảng Giá Đất 2026 (Bình Dương/HCM)</title>
+    <meta name="title" content="GeoMaster - Tra Cứu Quy Hoạch & Bảng Giá Đất 2026 (Bình Dương/HCM)" />
+    <meta name="description" content="Hệ thống WebGIS chuyên nghiệp hỗ trợ tra cứu thông tin quy hoạch, bảng giá đất năm 2026, bản đồ địa chính và quản lý đất đai tại Bình Dương, TP.HCM. Dữ liệu cập nhật liên tục, chính xác." />
+    <meta name="keywords" content="tra cứu quy hoạch, bảng giá đất 2026, giá đất bình dương, giá đất hcm, bản đồ địa chính, webgis, geomaster, quy hoạch sử dụng đất, thông tin đất đai" />
+    <meta name="author" content="GISVN Team" />
+    <meta name="robots" content="index, follow" />
+    <meta name="google-site-verification" content="HÃY_NHẬP_MÃ_XÁC_THỰC_GOOGLE_CONSOLE_CỦA_BẠN_VÀO_ĐÂY" />
+
+    <!-- OPEN GRAPH / FACEBOOK / ZALO -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://geo.gisvn.space/" />
+    <meta property="og:title" content="GeoMaster - Bản đồ Quy hoạch & Giá đất Online" />
+    <meta property="og:description" content="Tra cứu nhanh quy hoạch, giá đất, thông tin thửa đất trực tuyến. Hỗ trợ định vị GPS, xem bản đồ vệ tinh và lớp phủ quy hoạch." />
+    <meta property="og:image" content="https://geo.gisvn.space/og-image.jpg" />
+
+    <!-- TWITTER -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://geo.gisvn.space/" />
+    <meta property="twitter:title" content="GeoMaster - WebGIS Quy hoạch & Giá đất" />
+    <meta property="twitter:description" content="Công cụ tra cứu quy hoạch và giá đất hàng đầu." />
+    <meta property="twitter:image" content="https://geo.gisvn.space/og-image.jpg" />
+
+    <!-- STRUCTURED DATA (JSON-LD) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "GeoMaster WebGIS",
+      "url": "https://geo.gisvn.space/",
+      "description": "Hệ thống WebGIS quản lý đất đai và tra cứu quy hoạch.",
+      "applicationCategory": "Geographic Information System",
+      "operatingSystem": "Web Browser",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "VND"
+      }
+    }
+    </script>
+
+    <!-- Sửa link icon mặc định sang UNPKG để tránh 404 -->
+    <link id="favicon" rel="icon" href="https://unpkg.com/lucide-static@latest/icons/map-pin.svg" />
+    
+    <!-- OpenLayers CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v10.7.0/ol.css">
+    
+    <!-- Google Fonts với bộ ký tự Vietnamese subset -->
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;900&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "proj4": "https://esm.sh/proj4@^2.20.2",
+    "ol/": "https://esm.sh/ol@^10.7.0/",
+    "jspdf": "https://esm.sh/jspdf@^4.0.0",
+    "html2canvas": "https://esm.sh/html2canvas@^1.4.1",
+    "recharts": "https://esm.sh/recharts@^3.6.0",
+    "express": "https://esm.sh/express@^5.2.1",
+    "cors": "https://esm.sh/cors@^2.8.5",
+    "pg": "https://esm.sh/pg@^8.16.3",
+    "path": "https://esm.sh/path@^0.12.7",
+    "url": "https://esm.sh/url@^0.11.4",
+    "fs": "https://esm.sh/fs@^0.0.1-security",
+    "nodemailer": "https://esm.sh/nodemailer@^7.0.12",
+    "vite": "https://esm.sh/vite@^7.3.1",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "multer": "https://esm.sh/multer@^2.0.2",
+    "shpjs": "https://esm.sh/shpjs@^6.2.0",
+    "qrcode": "https://esm.sh/qrcode@^1.5.4",
+    "crypto": "https://esm.sh/crypto@^1.0.1",
+    "os": "https://esm.sh/os@^0.1.2",
+    "ol": "https://esm.sh/ol@^10.7.0",
+    "react-router-dom": "https://esm.sh/react-router-dom@^7.12.0",
+    "jsonwebtoken": "https://esm.sh/jsonwebtoken@^9.0.3"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
