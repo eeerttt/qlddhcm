@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
     const apiProxyTarget = env.VITE_DEV_API_PROXY_TARGET || 'http://localhost:3004';
 
     return {
-        base: './', // Quan trọng: Dùng ./ để assets load đúng từ thư mục hiện tại thay vì root domain
+        base: '/',
         server: {
             port: 3000,
             strictPort: true,

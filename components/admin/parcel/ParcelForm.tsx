@@ -1,7 +1,7 @@
 
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { X, Save, RefreshCw, Edit, Plus, FileUp, MapPin, Calculator, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { ParcelDTO, API_URL } from '../../../services/parcelApi';
+import { ParcelDTO } from '../../../services/parcelApi';
 import shp from 'shpjs';
 import { getArea } from 'ol/sphere';
 import GeoJSON from 'ol/format/GeoJSON';
@@ -21,7 +21,6 @@ const ParcelForm: React.FC<ParcelFormProps> = ({
     isOpen, onClose, editingId, formData, setFormData, handleSubmit, loading 
 }) => {
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const imageInputRef = useRef<HTMLInputElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [isParsing, setIsParsing] = useState(false);
     const [parseError, setParseError] = useState<string | null>(null);
@@ -182,19 +181,6 @@ const ParcelForm: React.FC<ParcelFormProps> = ({
         }
     };
 
-    const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            setFormData({ ...formData, imageFile: file });
-            // Tạo preview URL tạm thời
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                setFormData({ ...formData, imageFile: file, imageUrl: event.target?.result as string });
-            };
-            reader.readAsDataURL(file);
-        }
-    };
-
     // Hàm trích xuất thông tin từ hình học (Diện tích, Thuộc tính)
     const processExtractedData = (geometry: any, props: any, file: File) => {
         // 1. Tính diện tích tự động
@@ -221,7 +207,6 @@ const ParcelForm: React.FC<ParcelFormProps> = ({
         const extractedOwner = findVal(['tenchu', 'ten_chu', 'chu_so_huu', 'owner']);
         const extractedLoaiDat = findVal(['loaidat', 'kyhieumucd', 'mucdich', 'mdsd']);
         const extractedDiaChi = findVal(['diachi', 'dia_chi', 'address', 'location']);
-        const extractedImageUrl = findVal(['imageurl', 'image_url', 'hinhanh', 'hinh_anh', 'photo']);
 
         setFormData({
             ...formData,
@@ -232,7 +217,6 @@ const ParcelForm: React.FC<ParcelFormProps> = ({
             tenchu: extractedOwner || formData.tenchu,
             loaidat: extractedLoaiDat || formData.loaidat,
             diachi: extractedDiaChi || formData.diachi,
-            imageUrl: extractedImageUrl || formData.imageUrl,
             file: file
         });
     };
@@ -295,48 +279,6 @@ const ParcelForm: React.FC<ParcelFormProps> = ({
                             <div className="space-y-2">
                                 <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">Địa chỉ chi tiết</label>
                                 <textarea className="w-full bg-gray-950 border border-gray-700 rounded-2xl p-4 text-sm focus:border-blue-500 outline-none h-24 resize-none text-white transition-all shadow-inner" placeholder="Phường/Xã, Quận/Huyện..." value={formData.diachi||''} onChange={e=>setFormData({...formData, diachi: e.target.value})} />
-                            </div>
-
-                            <div className="space-y-2">
-                                <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">Hình ảnh thửa đất</label>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                        <p className="text-[9px] text-gray-600 font-bold uppercase ml-1">Tải ảnh lên</p>
-                                        <div 
-                                            className="w-full bg-gray-950 border border-gray-700 rounded-2xl p-4 flex items-center justify-between cursor-pointer hover:border-blue-500 transition-all shadow-inner"
-                                            onClick={() => imageInputRef.current?.click()}
-                                        >
-                                            <span className="text-xs text-gray-500 truncate max-w-[150px]">
-                                                {formData.imageFile ? formData.imageFile.name : 'Chọn tệp ảnh...'}
-                                            </span>
-                                            <FileUp size={16} className="text-gray-500" />
-                                        </div>
-                                        <input 
-                                            type="file" 
-                                            ref={imageInputRef} 
-                                            className="hidden" 
-                                            accept="image/*" 
-                                            onChange={handleImageFileChange} 
-                                        />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <p className="text-[9px] text-gray-600 font-bold uppercase ml-1">Hoặc nhập URL</p>
-                                        <input className="w-full bg-gray-950 border border-gray-700 rounded-2xl p-4 text-sm focus:border-blue-500 outline-none font-bold text-white transition-all shadow-inner" placeholder="https://..." value={formData.imageUrl||''} onChange={e=>setFormData({...formData, imageUrl: e.target.value})} />
-                                    </div>
-                                </div>
-                                {formData.imageUrl && (
-                                    <div className="mt-2 w-full h-40 rounded-2xl overflow-hidden border border-gray-800 relative group">
-                                        <img 
-                                            src={formData.imageUrl.startsWith('http') || formData.imageUrl.startsWith('data:') ? formData.imageUrl : `${API_URL}${formData.imageUrl}`} 
-                                            alt="Preview" 
-                                            className="w-full h-full object-cover" 
-                                            referrerPolicy="no-referrer" 
-                                        />
-                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                            <p className="text-[10px] font-black text-white uppercase tracking-widest">Xem trước hình ảnh</p>
-                                        </div>
-                                    </div>
-                                )}
                             </div>
 
                         <div className="pt-6 flex gap-4">

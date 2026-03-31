@@ -117,6 +117,12 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
 
     useEffect(() => {
         if (!mapElement.current || mapInstance.current) return;
+        const initLng = parseFloat(systemSettings?.map_center_lng ?? '') || MAP_CONFIG.DEFAULT_CENTER[0];
+        const initLat = parseFloat(systemSettings?.map_center_lat ?? '') || MAP_CONFIG.DEFAULT_CENTER[1];
+        const initZoom = parseFloat(systemSettings?.default_zoom ?? '') || MAP_CONFIG.DEFAULT_ZOOM;
+        const initMinZoom = parseFloat(systemSettings?.map_min_zoom ?? '') || MAP_CONFIG.MIN_ZOOM;
+        const initMaxZoom = parseFloat(systemSettings?.map_max_zoom ?? '') || MAP_CONFIG.MAX_ZOOM;
+
         const map = new Map({
             target: mapElement.current,
             layers: [
@@ -127,10 +133,10 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
                 new VectorLayer({ source: measureSource.current, zIndex: 30000, style: measureStyle }),
             ],
             view: new View({ 
-                center: proj.fromLonLat([MAP_CONFIG.DEFAULT_CENTER[0], MAP_CONFIG.DEFAULT_CENTER[1]]), 
-                zoom: MAP_CONFIG.DEFAULT_ZOOM, 
-                minZoom: MAP_CONFIG.MIN_ZOOM, 
-                maxZoom: MAP_CONFIG.MAX_ZOOM 
+                center: proj.fromLonLat([initLng, initLat]), 
+                zoom: initZoom, 
+                minZoom: initMinZoom, 
+                maxZoom: initMaxZoom 
             }),
             controls: defaultControls({ attribution: false })
         });

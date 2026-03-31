@@ -3,7 +3,6 @@ import React, { useState, useEffect } from 'react';
 import { LandParcel, User } from '../../types';
 import { X, Info, Map as MapIcon, Maximize2, FileText, Trash2, Edit3, Navigation, QrCode, Download, Share2 } from 'lucide-react';
 import QRCode from 'qrcode';
-import { API_URL } from '../../services/mockBackend';
 
 interface ParcelPopupProps {
     parcel: LandParcel;
@@ -14,57 +13,10 @@ interface ParcelPopupProps {
     onDelete?: (parcel: LandParcel) => void;
 }
 
-// Chuẩn hóa URL hình ảnh: chuyển URL localhost/127.0.0.1 thành URL dùng hostname hiện tại
-// để máy khác trong mạng LAN cũng tải được hình
-const normalizeImageUrl = (url: string, baseApiUrl: string): string => {
-    if (!url) return '';
-    try {
-        const parsed = new URL(url);
-        const h = parsed.hostname;
-        if (h === 'localhost' || h === '127.0.0.1' || h === '0.0.0.0') {
-            // Nếu URL chứa /uploads/, trích xuất path rồi ghép với API_URL hiện tại
-            if (parsed.pathname.includes('/uploads/')) {
-                return `${baseApiUrl}${parsed.pathname}`;
-            }
-            // Các URL khác: thay hostname bằng hostname trình duyệt đang dùng
-            parsed.hostname = window.location.hostname;
-            return parsed.toString();
-        }
-    } catch { /* không phải URL hợp lệ, bỏ qua */ }
-    return url;
-};
-
-// Tạo base API URL an toàn: luôn dùng hostname mà trình duyệt đang truy cập
-const getSafeApiUrl = (): string => {
-    try {
-        const parsed = new URL(API_URL);
-        const h = parsed.hostname;
-        if (h === 'localhost' || h === '127.0.0.1' || h === '0.0.0.0') {
-            parsed.hostname = window.location.hostname;
-            return parsed.toString().replace(/\/$/, '');
-        }
-    } catch { /* bỏ qua */ }
-    return API_URL;
-};
-
 const ParcelPopup: React.FC<ParcelPopupProps> = ({ parcel, user, onClose, onPrint, onEdit, onDelete }) => {
     const p = parcel.properties;
     const [showQR, setShowQR] = useState(false);
     const [qrDataUrl, setQrDataUrl] = useState<string>('');
-    const rawImageUrl = (p.imageUrl || p.image_url || '').toString().trim();
-    // Dùng API_URL đã normalize hostname để máy khác trong LAN cũng tải được
-    const safeApiUrl = getSafeApiUrl();
-    const imageSrc = rawImageUrl
-        ? rawImageUrl.startsWith('data:') || rawImageUrl.startsWith('blob:')
-            ? rawImageUrl
-            : rawImageUrl.startsWith('http')
-                ? normalizeImageUrl(rawImageUrl, safeApiUrl)
-                : rawImageUrl.startsWith('/uploads/')
-                    ? `${safeApiUrl}${rawImageUrl}`
-                    : rawImageUrl.startsWith('uploads/')
-                        ? `${safeApiUrl}/${rawImageUrl}`
-                        : `${safeApiUrl}/uploads/${rawImageUrl}`
-        : '';
 
     useEffect(() => {
         if (showQR) {
@@ -143,21 +95,6 @@ const ParcelPopup: React.FC<ParcelPopupProps> = ({ parcel, user, onClose, onPrin
 
             {/* Body */}
             <div className="p-4 space-y-3 max-h-[50vh] md:max-h-[400px] overflow-y-auto custom-scrollbar">
-                {imageSrc && (
-                    <div className="w-full h-40 rounded-xl overflow-hidden border border-gray-100 shadow-sm mb-2">
-                        <img 
-                            src={imageSrc}
-                            alt="Hình ảnh thửa đất" 
-                            className="w-full h-full object-cover"
-                            referrerPolicy="no-referrer"
-                            onError={(e) => {
-                                const target = e.currentTarget;
-                                target.style.display = 'none';
-                                console.warn('Parcel image load failed:', imageSrc);
-                            }}
-                        />
-                    </div>
-                )}
                 <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="bg-gray-50 p-2 rounded">
                         <p className="text-gray-500 font-bold uppercase text-[9px]">Số tờ</p>

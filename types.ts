@@ -76,7 +76,6 @@ export interface LandParcel {
     branchId: string;
     updatedBy?: string;
     updatedAt?: string;
-    imageUrl?: string;
     [key: string]: any;
   };
 }

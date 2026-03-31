@@ -24,7 +24,6 @@ import { smartMapProperties, measureStyle } from '../components/map/mapUtils';
 export const useMap = (user: User | null, systemSettings?: Record<string, string>) => {
     // Refs for Map Instance and Layers
     const mapInstance = useRef<Map | null>(null);
-    const PARCEL_IMAGE_CACHE_KEY = 'parcel_image_cache_v1';
     const highlightLayer = useRef<VectorLayer<VectorSource> | null>(null);
     const locationLayer = useRef<VectorLayer<VectorSource> | null>(null);
     const wmsLayerGroup = useRef<LayerGroup | null>(null);
@@ -32,17 +31,6 @@ export const useMap = (user: User | null, systemSettings?: Record<string, string
     const overlayInstance = useRef<Overlay | null>(null);
     const measureSource = useRef<VectorSource>(new VectorSource());
     const drawInteraction = useRef<Draw | null>(null);
-    const parcelImageCacheRef = useRef<Record<string, string>>({});
-
-    const setParcelImageCache = useCallback((key: string | null, imageUrl: string | null) => {
-        if (!key || !imageUrl) return;
-        parcelImageCacheRef.current[key] = imageUrl;
-        try {
-            localStorage.setItem(PARCEL_IMAGE_CACHE_KEY, JSON.stringify(parcelImageCacheRef.current));
-        } catch (error) {
-            // Ignore storage quota / private mode errors.
-        }
-    }, []);
 
     // Refs for Map Events (to avoid stale closures)
     const activeLayerIdRef = useRef<string | null>(null);
@@ -83,19 +71,6 @@ export const useMap = (user: User | null, systemSettings?: Record<string, string
     useEffect(() => { activeLayerIdRef.current = activeLayerId; }, [activeLayerId]);
     useEffect(() => { visibleLayerIdsRef.current = visibleLayerIds; }, [visibleLayerIds]);
     useEffect(() => { measureModeRef.current = measureMode; }, [measureMode]);
-
-    useEffect(() => {
-        try {
-            const raw = localStorage.getItem(PARCEL_IMAGE_CACHE_KEY);
-            if (!raw) return;
-            const parsed = JSON.parse(raw);
-            if (parsed && typeof parsed === 'object') {
-                parcelImageCacheRef.current = parsed;
-            }
-        } catch {
-            // Ignore malformed cache and continue.
-        }
-    }, []);
 
     const handleLocateUser = () => {
         if (!navigator.geolocation) {
@@ -140,79 +115,6 @@ export const useMap = (user: User | null, systemSettings?: Record<string, string
             { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
         );
     };
-
-    const resolveParcelImageUrl = useCallback(async (parcel: LandParcel): Promise<string | null> => {
-        const props = smartMapProperties(parcel.properties || {});
-
-        // If WMS already provides image field, reuse immediately.
-        if (props.imageUrl) {
-            return props.imageUrl;
-        }
-
-        const tableName = props.tableName || props.table_name;
-        const soTo = props.so_to || props.sodoto;
-        const soThua = props.so_thua || props.sothua;
-
-        const gidCacheKey = tableName && parcel.gid ? `${String(tableName).toLowerCase()}::gid::${String(parcel.gid)}` : null;
-        const sheetCacheKey = tableName && soTo && soThua
-            ? `${String(tableName).toLowerCase()}::sheet::${String(soTo).trim()}::${String(soThua).trim()}`
-            : null;
-
-        if (gidCacheKey && parcelImageCacheRef.current[gidCacheKey]) {
-            return parcelImageCacheRef.current[gidCacheKey];
-        }
-        if (sheetCacheKey && parcelImageCacheRef.current[sheetCacheKey]) {
-            return parcelImageCacheRef.current[sheetCacheKey];
-        }
-
-        if (!tableName) {
-            return null;
-        }
-
-        try {
-            // Preferred lookup: by map sheet + parcel number.
-            let rows: any[] = [];
-            if (soTo && soThua) {
-                rows = await parcelApi.getAll(String(tableName), {
-                    sodoto: String(soTo),
-                    sothua: String(soThua)
-                });
-            }
-
-            // Fallback lookup: by recent rows and match gid.
-            if (!Array.isArray(rows) || rows.length === 0) {
-                rows = await parcelApi.getAll(String(tableName));
-            }
-
-            if (!Array.isArray(rows) || rows.length === 0) {
-                return null;
-            }
-
-            const matched = rows.find((r: any) => Number(r.gid) === Number(parcel.gid)) || rows[0];
-            const resolved = matched?.image_url || matched?.imageUrl || matched?.hinh_anh || matched?.hinhanh || null;
-
-            if (resolved) {
-                const rowSoTo = matched?.sodoto || matched?.so_to || soTo;
-                const rowSoThua = matched?.sothua || matched?.so_thua || soThua;
-                const resolvedGidKey = matched?.gid ? `${String(tableName).toLowerCase()}::gid::${String(matched.gid)}` : gidCacheKey;
-                const resolvedSheetKey = rowSoTo && rowSoThua
-                    ? `${String(tableName).toLowerCase()}::sheet::${String(rowSoTo).trim()}::${String(rowSoThua).trim()}`
-                    : sheetCacheKey;
-
-                if (resolvedGidKey) {
-                    setParcelImageCache(resolvedGidKey, resolved);
-                }
-                if (resolvedSheetKey) {
-                    setParcelImageCache(resolvedSheetKey, resolved);
-                }
-            }
-
-            return resolved;
-        } catch (error) {
-            console.error('Resolve parcel image failed:', error);
-            return null;
-        }
-    }, [setParcelImageCache]);
 
     const isValidGid = (gid: any) => Number.isFinite(Number(gid)) && Number(gid) > 0;
 
@@ -275,22 +177,6 @@ export const useMap = (user: User | null, systemSettings?: Record<string, string
             });
         });
 
-        // Enrich image URL from data API if FeatureInfo response does not include image field.
-        void resolveParcelImageUrl(normalizedParcel).then((imageUrl) => {
-            if (!imageUrl) return;
-            setSelectedParcel((prev) => {
-                if (!prev || Number(prev.gid) !== Number(normalizedParcel.gid)) return prev;
-                return {
-                    ...prev,
-                    properties: {
-                        ...prev.properties,
-                        imageUrl,
-                        image_url: imageUrl
-                    }
-                };
-            });
-        });
-
         const source = highlightLayer.current.getSource();
         source?.clear();
         let popupPos = fallbackCoord;
@@ -322,7 +208,7 @@ export const useMap = (user: User | null, systemSettings?: Record<string, string
             } catch (err) { console.error("Geom error:", err); }
         }
         if (popupPos) overlayInstance.current?.setPosition(popupPos);
-    }, [resolveParcelGid, resolveParcelImageUrl]);
+    }, [resolveParcelGid]);
 
     const handleOpenEdit = (parcel: LandParcel) => {
         const p = parcel.properties;
@@ -334,7 +220,6 @@ export const useMap = (user: User | null, systemSettings?: Record<string, string
             diachi: p.address || '',
             loaidat: p.landType || '',
             dientich: p.area || 0,
-            imageUrl: p.imageUrl || '',
             geometry: parcel.geometry,
             tableName: p.tableName || p.table_name,
             file: null
@@ -418,40 +303,16 @@ export const useMap = (user: User | null, systemSettings?: Record<string, string
             }
 
             let response;
-            if (editFormData.file || editFormData.imageFile) {
-                // Strip base64 imageUrl if it's a data URL (it's only for preview)
-                const { imageUrl, ...dataWithoutBase64 } = editFormData;
-                const basePayload = (imageUrl?.startsWith('data:')) ? dataWithoutBase64 : editFormData;
-                const dataToSend: any = { ...basePayload };
+            if (editFormData.file) {
+                const dataToSend: any = { ...editFormData };
                 dataToSend.gid = effectiveGid;
-                if (dataToSend.imageUrl && !dataToSend.image_url) {
-                    dataToSend.image_url = dataToSend.imageUrl;
-                }
                 response = await parcelApi.createWithUpload(editFormData.tableName, dataToSend);
             } else {
                 const { geometry, ...dataOnlyAttrs } = editFormData;
-                const updatePayload: any = { ...dataOnlyAttrs };
-                if (updatePayload.imageUrl && !updatePayload.image_url) {
-                    updatePayload.image_url = updatePayload.imageUrl;
-                }
-                response = await parcelApi.update(editFormData.tableName, effectiveGid, updatePayload);
+                response = await parcelApi.update(editFormData.tableName, effectiveGid, dataOnlyAttrs);
             }
             
             if (selectedParcel) {
-                const persistedImageUrl = response?.image_url || response?.imageUrl || editFormData.imageUrl;
-
-                const tableKey = String(editFormData.tableName || selectedParcel.properties.tableName || '').toLowerCase();
-                const gidKey = tableKey && selectedParcel.gid ? `${tableKey}::gid::${String(selectedParcel.gid)}` : null;
-                const sheetKey = tableKey && editFormData.sodoto && editFormData.sothua
-                    ? `${tableKey}::sheet::${String(editFormData.sodoto).trim()}::${String(editFormData.sothua).trim()}`
-                    : null;
-                if (persistedImageUrl && gidKey) {
-                setParcelImageCache(gidKey, persistedImageUrl);
-                }
-                if (persistedImageUrl && sheetKey) {
-                    parcelImageCacheRef.current[sheetKey] = persistedImageUrl;
-                }
-
                 const updatedProperties = {
                     ...selectedParcel.properties,
                     so_to: editFormData.sodoto,
@@ -460,8 +321,6 @@ export const useMap = (user: User | null, systemSettings?: Record<string, string
                     address: editFormData.diachi,
                     landType: editFormData.loaidat,
                     area: editFormData.dientich,
-                    imageUrl: persistedImageUrl,
-                    image_url: persistedImageUrl
                 };
                 setSelectedParcel({ ...selectedParcel, properties: updatedProperties });
             }

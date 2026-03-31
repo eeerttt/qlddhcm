@@ -4,7 +4,7 @@ import { LandParcel } from '../types';
 const PRODUCTION_API_URL = 'https://apigeo.gisvn.space';
 
 const getApiUrl = () => {
-    const { hostname, protocol } = window.location;
+    const { hostname, origin } = window.location;
     const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
 
     if (configuredApiUrl) {
@@ -16,21 +16,10 @@ const getApiUrl = () => {
         return PRODUCTION_API_URL; 
     }
 
-    // Local Development
-    const isLocal = 
-        hostname === 'localhost' || 
-        hostname === '127.0.0.1' || 
-        hostname === '0.0.0.0' ||
-        hostname.startsWith('192.168.') || 
-        hostname.startsWith('10.') || 
-        hostname.startsWith('172.');
-
-    if (isLocal) {
-        return `${protocol}//${hostname}:3004`;
-    }
-    
-    // Fallback cho môi trường khác (Codespace, Tunnel, etc)
-    return `${protocol}//${hostname}:3004`;
+    // Dùng origin (cùng host:port với trình duyệt) để đi qua Vite proxy
+    // Vite proxy sẽ chuyển tiếp /api → backend port 3004
+    // Tránh gọi trực tiếp port 3004 vì máy khác trong LAN có thể bị chặn firewall
+    return origin;
 };
 
 export const API_URL = getApiUrl();
@@ -45,8 +34,6 @@ export interface ParcelDTO {
     dientich?: number;
     geometry?: any; 
     file?: File | null; 
-    imageFile?: File | null;
-    imageUrl?: string;
     [key: string]: any; 
 }
 
@@ -136,7 +123,6 @@ export const parcelApi = {
         const formData = new FormData();
         Object.keys(data).forEach(key => {
             if (key === 'file' && data[key]) formData.append('file', data[key] as File);
-            else if (key === 'imageFile' && data[key]) formData.append('imageFile', data[key] as File);
             else if (key === 'geometry' && data[key]) formData.append(key, JSON.stringify(data[key]));
             else if (data[key] !== undefined && data[key] !== null) formData.append(key, String(data[key]));
         });

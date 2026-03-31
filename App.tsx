@@ -34,13 +34,13 @@ const PageLoader = () => (
 // Bản đồ ánh xạ giữa ID Menu và URL Path
 const PATH_MAPPING: Record<string, string> = {
     'map': '/',
-    'dashboard': '/dashboard',
-    'editor': '/editor',
-    'profile': '/profile',
-    'messaging': '/messages',
-    'qr-generator': '/tools/qr',
-    'land-price': '/land-price',
-    'admin': '/admin'
+    'dashboard': '/thongke',
+    'editor': '/chinhsuabanve',
+    'profile': '/hoso',
+    'messaging': '/tinnhan',
+    'qr-generator': '/taomaqr',
+    'land-price': '/giadata',
+    'admin': '/quantri'
 };
 
 // Bản đồ ngược để highlight Sidebar dựa trên URL
@@ -65,8 +65,8 @@ const App: React.FC = () => {
   // Xác định activePage cho Sidebar dựa trên URL hiện tại
   const currentPath = location.pathname === '/' ? '/' : `/${location.pathname.split('/')[1]}`;
   const activePage = REVERSE_PATH_MAPPING[currentPath] || 
-                     (location.pathname.startsWith('/admin') ? 'admin' : 
-                     (location.pathname.startsWith('/tools/qr') ? 'qr-generator' : 'map'));
+                     (location.pathname.startsWith('/quantri') ? 'admin' : 
+                     (location.pathname.startsWith('/taomaqr') ? 'qr-generator' : 'map'));
 
   const boot = async () => {
       setLoading(true);
@@ -142,7 +142,7 @@ const App: React.FC = () => {
     setResetToken(null);
     setVerificationToken(null);
     // Điều hướng dựa trên role sau khi login
-    navigate(loggedInUser.role === UserRole.ADMIN ? '/admin' : '/dashboard');
+    navigate(loggedInUser.role === UserRole.ADMIN ? '/quantri' : '/thongke');
   };
 
   const handleLogout = () => {
@@ -223,7 +223,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen w-full bg-gray-900 overflow-hidden font-sans relative">
-      {!location.pathname.startsWith('/admin') && (
+      {!location.pathname.startsWith('/quantri') && (
         <Sidebar 
           user={user} 
           activePage={activePage} 
@@ -236,21 +236,21 @@ const App: React.FC = () => {
           logoUrl={systemSettings['site_logo']}
         />
       )}
-      <main className={`flex-1 h-full relative overflow-hidden bg-gray-100 flex flex-col transition-all ${location.pathname.startsWith('/admin') ? 'w-full' : ''}`}>
+      <main className={`flex-1 h-full relative overflow-hidden bg-gray-100 flex flex-col transition-all ${location.pathname.startsWith('/quantri') ? 'w-full' : ''}`}>
         <Suspense fallback={<PageLoader />}>
             <Routes>
                 <Route path="/" element={<MapPage user={user} systemSettings={systemSettings} />} />
-                <Route path="/land-price" element={<LandPriceLookup />} />
-                <Route path="/tools/qr" element={<QRGenerator />} />
+                <Route path="/giadata" element={<LandPriceLookup />} />
+                <Route path="/taomaqr" element={<QRGenerator />} />
                 
                 {/* Protected Routes */}
-                <Route path="/dashboard" element={<ProtectedRoute><Dashboard user={user!} /></ProtectedRoute>} />
-                <Route path="/editor" element={<ProtectedRoute><EditorPage user={user!} /></ProtectedRoute>} />
-                <Route path="/profile" element={<ProtectedRoute><UserProfile user={user!} onUpdateUser={u => { setUser(u); localStorage.setItem('geo_user', JSON.stringify(u)); }} /></ProtectedRoute>} />
-                <Route path="/messages" element={<ProtectedRoute><Messaging user={user!} /></ProtectedRoute>} />
+                <Route path="/thongke" element={<ProtectedRoute><Dashboard user={user!} /></ProtectedRoute>} />
+                <Route path="/chinhsuabanve" element={<ProtectedRoute><EditorPage user={user!} /></ProtectedRoute>} />
+                <Route path="/hoso" element={<ProtectedRoute><UserProfile user={user!} onUpdateUser={u => { setUser(u); localStorage.setItem('geo_user', JSON.stringify(u)); }} /></ProtectedRoute>} />
+                <Route path="/tinnhan" element={<ProtectedRoute><Messaging user={user!} /></ProtectedRoute>} />
                 
                 {/* Admin Route */}
-                <Route path="/admin" element={
+                <Route path="/quantri" element={
                     <ProtectedRoute requiredRole={UserRole.ADMIN}>
                         <AdminPage systemName={systemSettings['system_name']} logoUrl={systemSettings['site_logo']} />
                     </ProtectedRoute>

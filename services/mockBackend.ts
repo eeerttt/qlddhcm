@@ -151,7 +151,7 @@ export const gisService = {
              if (!Array.isArray(data)) return [];
              return data.map((item: any) => ({
                  id: item.gid?.toString() || `p-${Math.random()}`, gid: item.gid, geometry: item.geometry,
-                 properties: { ...item, so_to: item.sodoto, so_thua: item.sothua, ownerName: item.tenchu, address: item.diachi, area: item.dientich, landType: item.loaidat || item.kyhieumucd || 'Chưa cập nhật', tableName: tableName, imageUrl: item.image_url }
+                 properties: { ...item, so_to: item.sodoto, so_thua: item.sothua, ownerName: item.tenchu, address: item.diachi, area: item.dientich, landType: item.loaidat || item.kyhieumucd || 'Chưa cập nhật', tableName: tableName }
              }));
         } catch { return []; }
     }
