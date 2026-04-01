@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Sensitive backend configuration
+backend_guide/db_config.js

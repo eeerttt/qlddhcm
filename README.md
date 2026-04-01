@@ -1,32 +1,98 @@
-1. Install dependencies:
-   `npm install`
-3. Run frontend only:
-   `npm run dev`
-4. Run backend only:
-   `npm run dev:backend`
-5. Run frontend and backend together in two independent processes:
-   `npm run dev:all`
+# qlddhcm
 
-Frontend dev server runs on `http://localhost:3000` and proxies `/api` plus `/uploads` to the backend on `http://localhost:3004`.
+Hệ thống WebGIS quản lý đất đai, bao gồm:
+- Frontend React + Vite
+- Backend Node.js/Express trong thư mục `backend_guide`
+- Proxy API nội bộ qua Vite trong môi trường development
 
-## API Configuration
+## Yêu cầu
 
-Production frontend domains `geo.gisvn.space` and `qlddhcm.io.vn` now default to:
-`https://apigeo.gisvn.space`
+- Node.js 18+ (khuyến nghị Node.js 20 LTS)
+- npm 9+
 
-You can override the API base URL with Vite environment variables.
+## Cài đặt
 
-Create `.env.local` in the project root when needed:
+```bash
+npm install
+```
+
+## Chạy dự án
+
+### 1. Chạy frontend
+
+```bash
+npm run dev
+```
+
+hoặc
+
+```bash
+npm run dev:frontend
+```
+
+Frontend chạy tại: `http://localhost:3000`
+
+### 2. Chạy backend
+
+```bash
+npm run dev:backend
+```
+
+Backend chạy tại: `http://localhost:3004`
+
+### 3. Chạy đồng thời frontend + backend
+
+```bash
+npm run dev:all
+```
+
+Script này chạy 2 process độc lập bằng `concurrently`.
+
+## Build và preview
+
+```bash
+npm run build
+npm run preview
+```
+
+## Kiểm tra TypeScript
+
+```bash
+npm run lint
+```
+
+## Cấu hình API
+
+### Mặc định
+
+- Trên domain production `geo.gisvn.space`, `www.geo.gisvn.space`, `qlddhcm.io.vn`, `www.qlddhcm.io.vn`:
+  frontend mặc định gọi API tại `https://apigeo.gisvn.space`.
+- Trong môi trường local (không set biến môi trường):
+  frontend gọi cùng origin và Vite proxy chuyển tiếp `/api`, `/uploads` sang backend.
+
+### Tùy chỉnh bằng biến môi trường
+
+Tạo file `.env.local` ở root dự án:
 
 ```env
 VITE_API_URL=https://apigeo.gisvn.space
 VITE_DEV_API_PROXY_TARGET=https://apigeo.gisvn.space
 ```
 
-How it works:
+Ý nghĩa:
 
-1. `VITE_API_URL`: frontend calls this exact API host directly.
-2. `VITE_DEV_API_PROXY_TARGET`: Vite proxy forwards `/api` and `/uploads` to this target during local development.
-3. If `VITE_API_URL` is not set, production website domains still use `https://apigeo.gisvn.space` by default.
-4. If `VITE_API_URL` is not set in local development, frontend keeps using current origin and Vite proxy handles the API routing.
-"# qlddhcm"  
+1. `VITE_API_URL`: frontend gọi trực tiếp host API này.
+2. `VITE_DEV_API_PROXY_TARGET`: Vite proxy chuyển tiếp `/api` và `/uploads` đến host này trong lúc dev.
+
+## Cấu trúc chính
+
+- `components/`: UI components
+- `pages/`: các trang chính
+- `hooks/`: logic dùng lại (map, editor, export)
+- `services/`: API client
+- `backend_guide/`: backend Express, routes, middleware
+
+## Ghi chú vận hành
+
+- Upload tệp dùng endpoint `/uploads` (đi qua proxy trong dev).
+- Nếu backend không chạy, các chức năng dữ liệu/map sẽ lỗi do không gọi được `/api`.
