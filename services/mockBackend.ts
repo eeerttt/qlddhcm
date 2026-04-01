@@ -306,5 +306,16 @@ export const authService = {
 };
 
 export const statsService = {
-    getDashboardStats: async (): Promise<DashboardStats> => { try { return await apiCall('/stats/dashboard'); } catch { return { totalParcels: 0, totalArea: 0, totalValue: 0, parcelsByType: [], valueByBranch: [] }; } }
+    getDashboardStats: async (params?: { period?: 'all' | '7d' | '30d' | '90d'; from?: string; to?: string }): Promise<DashboardStats> => {
+        try {
+            const qs = new URLSearchParams();
+            if (params?.period) qs.set('period', params.period);
+            if (params?.from) qs.set('from', params.from);
+            if (params?.to) qs.set('to', params.to);
+            const endpoint = qs.toString() ? `/stats/dashboard?${qs.toString()}` : '/stats/dashboard';
+            return await apiCall(endpoint);
+        } catch {
+            return { totalParcels: 0, totalArea: 0, totalValue: 0, parcelsByType: [], valueByBranch: [] };
+        }
+    }
 };
