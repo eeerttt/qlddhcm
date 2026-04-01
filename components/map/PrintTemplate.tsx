@@ -166,119 +166,182 @@ const PrintTemplate: React.FC<PrintTemplateProps> = ({ parcel, user, systemSetti
     // Tự động tính toán kích thước font bảng dựa trên số lượng điểm
     const getTableStyles = () => {
         const count = geometryPoints.length;
-        if (count > 40) return { fontSize: '9px', padding: '2px', lineHeight: '1.1' };
-        if (count > 25) return { fontSize: '10px', padding: '3px', lineHeight: '1.2' };
-        return { fontSize: '12px', padding: '5px', lineHeight: '1.4' };
+        if (count > 60) return { fontSize: '11px', padding: '5px', lineHeight: '1.35', rowHeight: '26px' };
+        if (count > 30) return { fontSize: '12px', padding: '6px', lineHeight: '1.4', rowHeight: '28px' };
+        return { fontSize: '13px', padding: '7px', lineHeight: '1.45', rowHeight: '30px' };
     };
 
     const tableStyle = getTableStyles();
+    const firstPageRows = geometryPoints.length > 60 ? 12 : 16;
+    const nextPageRows = 24;
+    const firstRows = geometryPoints.slice(0, firstPageRows);
+    const tailRows = geometryPoints.slice(firstPageRows);
+    const extraChunks: GeometryPoint[][] = [];
+    for (let i = 0; i < tailRows.length; i += nextPageRows) {
+        extraChunks.push(tailRows.slice(i, i + nextPageRows));
+    }
+
+    const renderTable = (rows: GeometryPoint[]) => (
+        <table style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            tableLayout: "fixed",
+            fontSize: tableStyle.fontSize,
+            textAlign: "center",
+            border: "1px solid #000",
+            color: "#000000",
+            lineHeight: tableStyle.lineHeight,
+            fontFamily: 'Arial, Helvetica, sans-serif',
+            backgroundColor: '#ffffff'
+        }}>
+            <thead>
+                <tr style={{ backgroundColor: "#f2f2f2" }}>
+                    <th style={{ border: "0.75px solid #000", padding: tableStyle.padding, fontWeight: "bold", verticalAlign: 'middle', height: tableStyle.rowHeight }}>Số hiệu đỉnh</th>
+                    <th style={{ border: "0.75px solid #000", padding: tableStyle.padding, fontWeight: "bold", verticalAlign: 'middle', height: tableStyle.rowHeight }}>Tọa độ X (m)</th>
+                    <th style={{ border: "0.75px solid #000", padding: tableStyle.padding, fontWeight: "bold", verticalAlign: 'middle', height: tableStyle.rowHeight }}>Tọa độ Y (m)</th>
+                    <th style={{ border: "0.75px solid #000", padding: tableStyle.padding, fontWeight: "bold", verticalAlign: 'middle', height: tableStyle.rowHeight }}>Cạnh (m)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows.map((p, i) => (
+                    <tr key={`${p.id}-${i}`}>
+                        <td style={{ border: "0.75px solid #000", padding: tableStyle.padding, fontWeight: "bold", verticalAlign: 'middle', height: tableStyle.rowHeight }}>{p.id}</td>
+                        <td style={{ border: "0.75px solid #000", padding: tableStyle.padding, verticalAlign: 'middle', height: tableStyle.rowHeight, whiteSpace: 'nowrap' }}>{p.x.toFixed(3)}</td>
+                        <td style={{ border: "0.75px solid #000", padding: tableStyle.padding, verticalAlign: 'middle', height: tableStyle.rowHeight, whiteSpace: 'nowrap' }}>{p.y.toFixed(3)}</td>
+                        <td style={{ border: "0.75px solid #000", padding: tableStyle.padding, fontWeight: "bold", verticalAlign: 'middle', height: tableStyle.rowHeight, whiteSpace: 'nowrap' }}>{p.distanceNext || "-"}</td>
+                    </tr>
+                ))}
+            </tbody>
+        </table>
+    );
 
     return (
-            <div id="print-template" style={{ 
-            width: "794px", 
-            minHeight: "1123px", 
-            padding: "40px 60px", 
-            backgroundColor: "#ffffff", 
-            color: "#000000", 
-            fontFamily: '"Times New Roman", Times, serif',
-            boxSizing: "border-box",
-            display: "flex",
-            flexDirection: "column",
-            position: "relative"
-        }}>
-            {/* Header Quốc huy / Tên CQ */}
-            <div style={{ textAlign: "center", marginBottom: "10px" }}>
-                <h3 style={{ fontWeight: "bold", fontSize: "14px", textTransform: "uppercase", margin: "0", color: "#000000" }}>
-                    {systemSettings?.pdf_header_1 || "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM"}
-                </h3>
-                <p style={{ fontWeight: "bold", fontSize: "13px", margin: "4px 0", display: "inline-block", borderBottom: "1.5px solid #000", paddingBottom: "5px", color: "#000000" }}>
-                    {systemSettings?.pdf_header_2 || "Độc lập - Tự do - Hạnh phúc"}
-                </p>
-            </div>
-
-            <h1 style={{ fontSize: "19px", fontWeight: "bold", textTransform: "uppercase", margin: "20px 0", textAlign: "center", color: "#000000" }}>
-                {systemSettings?.pdf_title || "TRÍCH LỤC BẢN ĐỒ ĐỊA CHÍNH"}
-            </h1>
-
-            {/* Thông tin thửa đất - Nhóm lại để tiết kiệm diện tích */}
-            <div style={{ fontSize: "14px", lineHeight: "1.5", marginBottom: "10px", color: "#000000" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                    <p style={{ margin: "0" }}><strong>1. Thửa đất số:</strong> {getAttribute(formData, ["so_thua", "sothua", "shthua"]) || "..."}</p>
-                    <p style={{ margin: "0" }}><strong>Tờ bản đồ số:</strong> {getAttribute(formData, ["so_to", "sodoto", "shmap"]) || "..."}</p>
-                    <p style={{ margin: "0" }}><strong>Diện tích:</strong> <span style={{ fontWeight: "bold" }}>{getAttribute(formData, ["dientich", "area"]) ? Number(getAttribute(formData, ["dientich", "area"])).toFixed(1) : "..."} m²</span></p>
-                </div>
-                <p style={{ margin: "4px 0" }}><strong>2. Địa chỉ:</strong> {getAttribute(formData, ["diachi", "address", "dc"]) || "Chưa xác định"}</p>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                    <p style={{ margin: "0" }}><strong>3. Mục đích sử dụng:</strong> {formData.landType || "Đất ở"}</p>
-                    <p style={{ margin: "0" }}><strong>4. Người sử dụng:</strong> <span style={{ textTransform: "uppercase", fontWeight: "bold" }}>{getAttribute(formData, ["tenchu", "ownerName"]) || "Chưa xác định"}</span></p>
-                </div>
-                <p style={{ margin: "4px 0", fontWeight: "bold" }}>5. Sơ đồ thửa đất:</p>
-            </div>
-            
-            {/* Hình vẽ thửa đất - Thu nhỏ chiều cao nếu cần không gian cho bảng */}
-            <div style={{ width: "100%", border: "1px solid #000", padding: "5px", marginBottom: "10px", position: "relative", backgroundColor: "#ffffff" }}>
-                <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "380px" }}>
-                    <canvas ref={parcelCanvasRef} width={650} height={380} style={{ maxWidth: "100%" }} />
-                </div>
-            </div>
-
-            {/* Bảng tọa độ - Cơ chế co giãn linh hoạt */}
-            <div style={{ width: "100%", marginBottom: "15px" }}>
-                <p style={{ fontWeight: "bold", fontSize: "13px", marginBottom: "5px", fontStyle: "italic", color: "#000000" }}>6. Bảng kê tọa độ và khoảng cách:</p>
-                <table style={{ 
-                    width: "100%", 
-                    borderCollapse: "collapse", 
-                    fontSize: tableStyle.fontSize, 
-                    textAlign: "center", 
-                    border: "1.5px solid #000",
-                    color: "#000000",
-                    lineHeight: tableStyle.lineHeight
-                }}>
-                    <thead>
-                        <tr style={{ backgroundColor: "#f2f2f2" }}>
-                            <th style={{ border: "1px solid #000", padding: tableStyle.padding, fontWeight: "bold" }}>Số hiệu đỉnh</th>
-                            <th style={{ border: "1px solid #000", padding: tableStyle.padding, fontWeight: "bold" }}>Tọa độ X (m)</th>
-                            <th style={{ border: "1px solid #000", padding: tableStyle.padding, fontWeight: "bold" }}>Tọa độ Y (m)</th>
-                            <th style={{ border: "1px solid #000", padding: tableStyle.padding, fontWeight: "bold" }}>Cạnh (m)</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {geometryPoints.map((p, i) => (
-                            <tr key={i}>
-                                <td style={{ border: "1px solid #000", padding: tableStyle.padding, fontWeight: "bold" }}>{p.id}</td>
-                                <td style={{ border: "1px solid #000", padding: tableStyle.padding }}>{p.x.toFixed(3)}</td>
-                                <td style={{ border: "1px solid #000", padding: tableStyle.padding }}>{p.y.toFixed(3)}</td>
-                                <td style={{ border: "1px solid #000", padding: tableStyle.padding, fontWeight: "bold" }}>{p.distanceNext || "-"}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-
-            {/* Chữ ký và QR - Đẩy xuống cuối */}
-            <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: "auto", paddingBottom: "10px" }}>
-                {/* QR Code for Verification */}
-                <div style={{ textAlign: "center", width: "120px" }}>
-                    {qrCodeUrl && <img src={qrCodeUrl} alt="QR Verify" style={{ width: "70px", height: "70px", border: "1px solid #000", padding: "1px" }} />}
-                    <p style={{ fontSize: "8px", color: "#000000", marginTop: "4px", fontStyle: "italic" }}>Quét xác thực</p>
-                </div>
-
-                <div style={{ textAlign: "center", width: "300px" }}>
-                    <p style={{ fontStyle: "italic", fontSize: "13px", color: "#000000", margin: "0" }}>TP. Hồ Chí Minh, ngày {new Date().getDate()} tháng {new Date().getMonth() + 1} năm {new Date().getFullYear()}</p>
-                    <p style={{ fontWeight: "bold", textTransform: "uppercase", marginTop: "5px", fontSize: "13px", color: "#000000", margin: "5px 0" }}>
-                        {systemSettings?.pdf_signer_title || "Người trích lục"}
-                    </p>
-                    <div style={{ height: "50px" }}></div>
-                    <p style={{ fontWeight: "bold", textTransform: "uppercase", fontSize: "14px", color: "#000000", margin: "0" }}>
-                        {systemSettings?.pdf_signer_name || user?.name || "HỆ THỐNG WEBGIS"}
+        <div id="print-template" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div className="print-page" style={{
+                width: "794px",
+                minHeight: "1123px",
+                padding: "40px 60px",
+                backgroundColor: "#ffffff",
+                color: "#000000",
+                fontFamily: '"Times New Roman", Times, serif',
+                boxSizing: "border-box",
+                display: "flex",
+                flexDirection: "column",
+                position: "relative"
+            }}>
+                <div style={{ textAlign: "center", marginBottom: "10px" }}>
+                    <h3 style={{ fontWeight: "bold", fontSize: "14px", textTransform: "uppercase", margin: "0", color: "#000000" }}>
+                        {systemSettings?.pdf_header_1 || "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM"}
+                    </h3>
+                    <p style={{ fontWeight: "bold", fontSize: "13px", margin: "4px 0", display: "inline-block", borderBottom: "1.5px solid #000", paddingBottom: "5px", color: "#000000" }}>
+                        {systemSettings?.pdf_header_2 || "Độc lập - Tự do - Hạnh phúc"}
                     </p>
                 </div>
+
+                <h1 style={{ fontSize: "19px", fontWeight: "bold", textTransform: "uppercase", margin: "20px 0", textAlign: "center", color: "#000000" }}>
+                    {systemSettings?.pdf_title || "TRÍCH LỤC BẢN ĐỒ ĐỊA CHÍNH"}
+                </h1>
+
+                <div style={{ fontSize: "14px", lineHeight: "1.5", marginBottom: "10px", color: "#000000" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                        <p style={{ margin: "0" }}><strong>1. Thửa đất số:</strong> {getAttribute(formData, ["so_thua", "sothua", "shthua"]) || "..."}</p>
+                        <p style={{ margin: "0" }}><strong>Tờ bản đồ số:</strong> {getAttribute(formData, ["so_to", "sodoto", "shmap"]) || "..."}</p>
+                        <p style={{ margin: "0" }}><strong>Diện tích:</strong> <span style={{ fontWeight: "bold" }}>{getAttribute(formData, ["dientich", "area"]) ? Number(getAttribute(formData, ["dientich", "area"])).toFixed(1) : "..."} m²</span></p>
+                    </div>
+                    <p style={{ margin: "4px 0" }}><strong>2. Địa chỉ:</strong> {getAttribute(formData, ["diachi", "address", "dc"]) || "Chưa xác định"}</p>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                        <p style={{ margin: "0" }}><strong>3. Mục đích sử dụng:</strong> {formData.landType || "Đất ở"}</p>
+                        <p style={{ margin: "0" }}><strong>4. Người sử dụng:</strong> <span style={{ textTransform: "uppercase", fontWeight: "bold" }}>{getAttribute(formData, ["tenchu", "ownerName"]) || "Chưa xác định"}</span></p>
+                    </div>
+                    <p style={{ margin: "4px 0", fontWeight: "bold" }}>5. Sơ đồ thửa đất:</p>
+                </div>
+
+                <div style={{ width: "100%", border: "1px solid #000", padding: "5px", marginBottom: "10px", position: "relative", backgroundColor: "#ffffff" }}>
+                    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "380px" }}>
+                        <canvas ref={parcelCanvasRef} width={650} height={380} style={{ maxWidth: "100%" }} />
+                    </div>
+                </div>
+
+                <div style={{ width: "100%", marginBottom: "15px" }}>
+                    <p style={{ fontWeight: "bold", fontSize: "13px", marginBottom: "5px", fontStyle: "italic", color: "#000000" }}>6. Bảng kê tọa độ và khoảng cách:</p>
+                    {renderTable(firstRows)}
+                </div>
+
+                {extraChunks.length === 0 && (
+                    <>
+                        <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: "auto", paddingBottom: "10px" }}>
+                            <div style={{ textAlign: "center", width: "120px" }}>
+                                {qrCodeUrl && <img src={qrCodeUrl} alt="QR Verify" style={{ width: "70px", height: "70px", border: "1px solid #000", padding: "1px" }} />}
+                                <p style={{ fontSize: "8px", color: "#000000", marginTop: "4px", fontStyle: "italic" }}>Quét xác thực</p>
+                            </div>
+
+                            <div style={{ textAlign: "center", width: "300px" }}>
+                                <p style={{ fontStyle: "italic", fontSize: "13px", color: "#000000", margin: "0" }}>TP. Hồ Chí Minh, ngày {new Date().getDate()} tháng {new Date().getMonth() + 1} năm {new Date().getFullYear()}</p>
+                                <p style={{ fontWeight: "bold", textTransform: "uppercase", marginTop: "5px", fontSize: "13px", color: "#000000", margin: "5px 0" }}>
+                                    {systemSettings?.pdf_signer_title || "Người trích lục"}
+                                </p>
+                                <div style={{ height: "50px" }}></div>
+                                <p style={{ fontWeight: "bold", textTransform: "uppercase", fontSize: "14px", color: "#000000", margin: "0" }}>
+                                    {systemSettings?.pdf_signer_name || user?.name || "HỆ THỐNG WEBGIS"}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div style={{ paddingTop: "10px", textAlign: "center", fontSize: "9px", color: "#333", borderTop: "0.5px solid #000" }}>
+                            Cổng thông tin Địa chính GeoMaster - {systemSettings?.footer_text || "Trung tâm dữ liệu GIS"}
+                        </div>
+                    </>
+                )}
             </div>
 
-            {/* Footer bé */}
-            <div style={{ paddingTop: "10px", textAlign: "center", fontSize: "9px", color: "#333", borderTop: "0.5px solid #000" }}>
-                Cổng thông tin Địa chính GeoMaster - {systemSettings?.footer_text || "Trung tâm dữ liệu GIS"}
-            </div>
+            {extraChunks.map((chunk, chunkIndex) => {
+                const isLastChunk = chunkIndex === extraChunks.length - 1;
+                return (
+                    <div key={`page-${chunkIndex}`} className="print-page" style={{
+                        width: "794px",
+                        minHeight: "1123px",
+                        padding: "40px 60px",
+                        backgroundColor: "#ffffff",
+                        color: "#000000",
+                        fontFamily: '"Times New Roman", Times, serif',
+                        boxSizing: "border-box",
+                        display: "flex",
+                        flexDirection: "column",
+                        position: "relative"
+                    }}>
+                        <h2 style={{ fontSize: "16px", fontWeight: "bold", margin: "0 0 10px 0", textAlign: "center" }}>
+                            BẢNG KÊ TỌA ĐỘ VÀ KHOẢNG CÁCH (TIẾP THEO)
+                        </h2>
+                        {renderTable(chunk)}
+
+                        {isLastChunk && (
+                            <>
+                                <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: "auto", paddingBottom: "10px" }}>
+                                    <div style={{ textAlign: "center", width: "120px" }}>
+                                        {qrCodeUrl && <img src={qrCodeUrl} alt="QR Verify" style={{ width: "70px", height: "70px", border: "1px solid #000", padding: "1px" }} />}
+                                        <p style={{ fontSize: "8px", color: "#000000", marginTop: "4px", fontStyle: "italic" }}>Quét xác thực</p>
+                                    </div>
+
+                                    <div style={{ textAlign: "center", width: "300px" }}>
+                                        <p style={{ fontStyle: "italic", fontSize: "13px", color: "#000000", margin: "0" }}>TP. Hồ Chí Minh, ngày {new Date().getDate()} tháng {new Date().getMonth() + 1} năm {new Date().getFullYear()}</p>
+                                        <p style={{ fontWeight: "bold", textTransform: "uppercase", marginTop: "5px", fontSize: "13px", color: "#000000", margin: "5px 0" }}>
+                                            {systemSettings?.pdf_signer_title || "Người trích lục"}
+                                        </p>
+                                        <div style={{ height: "50px" }}></div>
+                                        <p style={{ fontWeight: "bold", textTransform: "uppercase", fontSize: "14px", color: "#000000", margin: "0" }}>
+                                            {systemSettings?.pdf_signer_name || user?.name || "HỆ THỐNG WEBGIS"}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div style={{ paddingTop: "10px", textAlign: "center", fontSize: "9px", color: "#333", borderTop: "0.5px solid #000" }}>
+                                    Cổng thông tin Địa chính GeoMaster - {systemSettings?.footer_text || "Trung tâm dữ liệu GIS"}
+                                </div>
+                            </>
+                        )}
+                    </div>
+                );
+            })}
         </div>
     );
 };

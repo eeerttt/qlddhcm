@@ -265,64 +265,48 @@ export const useMap = (user: User | null, systemSettings?: Record<string, string
                     }
                 }
 
-                const canvas = await html2canvas(element, {
-                    scale: 2.8,
-                    useCORS: true,
-                    logging: false,
-                    backgroundColor: '#ffffff',
-                    windowWidth: element.scrollWidth,
-                    windowHeight: element.scrollHeight,
-                    onclone: (clonedDoc) => {
-                        const clonedElement = clonedDoc.getElementById('print-template');
-                        if (clonedElement) {
-                            (clonedElement as HTMLElement).style.opacity = '1';
-                            (clonedElement as HTMLElement).style.position = 'relative';
-                            (clonedElement as HTMLElement).style.left = '0';
-                        }
-
-                        const textEls = clonedDoc.querySelectorAll('*');
-                        textEls.forEach(el => {
-                            (el as HTMLElement).style.color = '#000000';
-                            (el as HTMLElement).style.textShadow = 'none';
-                        });
-                    }
-                });
-
                 const pdf = new jsPDF('p', 'mm', 'a4');
                 const pageWidth = pdf.internal.pageSize.getWidth();
                 const pageHeight = pdf.internal.pageSize.getHeight();
-
                 const marginX = 8;
                 const marginTop = 8;
                 const marginBottom = 12;
                 const printableWidthMm = pageWidth - marginX * 2;
                 const printableHeightMm = pageHeight - marginTop - marginBottom;
-                const pageSliceHeightPx = Math.max(1, Math.floor((canvas.width * printableHeightMm) / printableWidthMm));
 
-                let offsetY = 0;
-                let pageIndex = 0;
+                const pages = Array.from(element.querySelectorAll('.print-page')) as HTMLElement[];
+                const targetPages = pages.length > 0 ? pages : [element as HTMLElement];
 
-                while (offsetY < canvas.height) {
-                    const sliceHeightPx = Math.min(pageSliceHeightPx, canvas.height - offsetY);
-                    const pageCanvas = document.createElement('canvas');
-                    pageCanvas.width = canvas.width;
-                    pageCanvas.height = sliceHeightPx;
+                for (let i = 0; i < targetPages.length; i++) {
+                    const pageElement = targetPages[i];
+                    const canvas = await html2canvas(pageElement, {
+                        scale: 3.6,
+                        useCORS: true,
+                        logging: false,
+                        backgroundColor: '#ffffff',
+                        windowWidth: pageElement.scrollWidth,
+                        windowHeight: pageElement.scrollHeight,
+                        onclone: (clonedDoc) => {
+                            const textEls = clonedDoc.querySelectorAll('*');
+                            textEls.forEach(el => {
+                                (el as HTMLElement).style.color = '#000000';
+                                (el as HTMLElement).style.textShadow = 'none';
+                            });
+                        }
+                    });
 
-                    const pageCtx = pageCanvas.getContext('2d');
-                    if (!pageCtx) throw new Error('Không thể dựng trang PDF tạm thời.');
+                    const imgData = canvas.toDataURL('image/png', 1.0);
+                    const renderedHeightMm = (canvas.height * printableWidthMm) / canvas.width;
+                    const isTooTall = renderedHeightMm > printableHeightMm;
+                    const drawHeightMm = isTooTall ? printableHeightMm : renderedHeightMm;
+                    const drawWidthMm = isTooTall ? (canvas.width * printableHeightMm) / canvas.height : printableWidthMm;
+                    const drawX = marginX + (printableWidthMm - drawWidthMm) / 2;
 
-                    pageCtx.fillStyle = '#ffffff';
-                    pageCtx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-                    pageCtx.drawImage(canvas, 0, offsetY, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
+                    if (i > 0) {
+                        pdf.addPage();
+                    }
 
-                    const pageImgData = pageCanvas.toDataURL('image/png', 1.0);
-                    const renderedHeightMm = (sliceHeightPx * printableWidthMm) / canvas.width;
-
-                    if (pageIndex > 0) pdf.addPage();
-                    pdf.addImage(pageImgData, 'PNG', marginX, marginTop, printableWidthMm, renderedHeightMm, undefined, 'FAST');
-
-                    offsetY += sliceHeightPx;
-                    pageIndex += 1;
+                    pdf.addImage(imgData, 'PNG', drawX, marginTop, drawWidthMm, drawHeightMm, undefined, 'FAST');
                 }
 
                 const totalPages = pdf.getNumberOfPages();
