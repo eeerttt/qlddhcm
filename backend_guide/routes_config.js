@@ -1,6 +1,6 @@
 
 import express from 'express';
-import { authenticateToken } from './middleware_auth.js';
+import { authenticateToken, requireAdmin } from './middleware_auth.js';
 
 export default function(pool, logSystemAction) {
     const router = express.Router();
@@ -166,7 +166,7 @@ export default function(pool, logSystemAction) {
         try { res.json((await pool.query(`SELECT * FROM menu_items ORDER BY order_index ASC`)).rows); } catch (e) { res.status(500).json({ error: e.message }); }
     });
     
-    router.post('/menu-items', authenticateToken, async (req, res) => {
+    router.post('/menu-items', authenticateToken, requireAdmin, async (req, res) => {
         try {
             await pool.query(`INSERT INTO menu_items (id, label, icon, roles, order_index, is_active, type, url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, [req.body.id, req.body.label, req.body.icon, req.body.roles, req.body.order_index, req.body.is_active, req.body.type, req.body.url]);
             await logSystemAction(req, 'ADD_MENU', `Thêm mục menu: ${req.body.label}`);
@@ -174,7 +174,7 @@ export default function(pool, logSystemAction) {
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
-    router.put('/menu-items/:id', authenticateToken, async (req, res) => {
+    router.put('/menu-items/:id', authenticateToken, requireAdmin, async (req, res) => {
         const { id } = req.params;
         const { label, icon, roles, order_index, is_active, type, url } = req.body;
         try {
@@ -183,7 +183,7 @@ export default function(pool, logSystemAction) {
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
-    router.delete('/menu-items/:id', authenticateToken, async (req, res) => {
+    router.delete('/menu-items/:id', authenticateToken, requireAdmin, async (req, res) => {
         try {
             await pool.query(`DELETE FROM menu_items WHERE id = $1`, [req.params.id]);
             res.json({ status: 'ok' });

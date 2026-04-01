@@ -1,14 +1,14 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { User, UserRole, MenuItem, SystemNotification } from '../types';
-import { LogOut, LogIn, ChevronLeft, ChevronRight, User as UserIcon, Database, HelpCircle, ExternalLink, Bell, X, Info, AlertTriangle, Clock, Mail, Menu } from 'lucide-react';
+import { LogOut, LogIn, ChevronLeft, ChevronRight, User as UserIcon, Database, HelpCircle, ExternalLink, Bell, X, Info, AlertTriangle, Clock, Menu } from 'lucide-react';
 import * as Icons from 'lucide-react';
 import { adminService, notificationService, API_URL } from '../services/mockBackend';
 
 interface SidebarProps {
   user: User | null;
   activePage: string;
-  onNavigate: (page: string) => void;
+  onNavigate: (page: string, routePath?: string) => void;
   onLogout: () => void;
   onLoginClick: () => void;
   onCollapse: () => void;
@@ -101,7 +101,8 @@ const Sidebar: React.FC<SidebarProps> = ({
       if (item.type === 'EXTERNAL' && item.url) {
           window.open(item.url, '_blank');
       } else {
-          onNavigate(item.id);
+        const internalPath = item.url?.startsWith('/') ? item.url : undefined;
+        onNavigate(item.id, internalPath);
           // Auto close on mobile after navigation
           if (window.innerWidth < 768 && !isCollapsed) {
               onCollapse();
@@ -250,19 +251,12 @@ const Sidebar: React.FC<SidebarProps> = ({
           ) : visibleItems.map(item => {
             const isActive = activePage === item.id;
             let IconComponent = (Icons as any)[item.icon] || HelpCircle;
-            
-            // Sửa label và icon cho Messaging động nếu cần
-            let label = item.label;
-            if (item.id === 'messaging') {
-                label = 'Hộp thư nội bộ';
-                IconComponent = Mail;
-            }
 
             return (
               <button
                 key={item.id}
                 onClick={() => handleMenuClick(item)}
-                title={isCollapsed ? label : ''}
+                title={isCollapsed ? item.label : ''}
                 className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all relative group overflow-hidden ${
                   isActive 
                     ? 'text-white bg-blue-600 shadow-lg shadow-blue-900/20' 
@@ -276,7 +270,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 {!isCollapsed && (
                   <div className="flex-1 flex items-center justify-between animate-in fade-in slide-in-from-left-2 duration-300 z-10">
                       <span className={`font-bold text-xs uppercase tracking-wide ${isActive ? 'text-white' : ''}`}>
-                          {label}
+                      {item.label}
                       </span>
                       {item.type === 'EXTERNAL' && (
                           <ExternalLink size={12} className="text-slate-500 group-hover:text-white transition-colors" />

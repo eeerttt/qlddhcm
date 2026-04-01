@@ -14,6 +14,10 @@ const ParcelManager: React.FC = () => {
     const [layer, setLayer] = useState('');
     const [availableTables, setAvailableTables] = useState<SpatialTable[]>([]);
     const [parcels, setParcels] = useState<ParcelDTO[]>([]);
+    const [page, setPage] = useState(1);
+    const [limit, setLimit] = useState(100);
+    const [total, setTotal] = useState(0);
+    const [pages, setPages] = useState(1);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [hasSearched, setHasSearched] = useState(false);
@@ -47,17 +51,20 @@ const ParcelManager: React.FC = () => {
     };
 
     useEffect(() => { loadTables(); }, []);
-    useEffect(() => { if (layer) { setParcels([]); setHasSearched(false); setError(null); } }, [layer]);
+    useEffect(() => { if (layer) { setParcels([]); setHasSearched(false); setError(null); setPage(1); setTotal(0); setPages(1); } }, [layer]);
 
-    const handleSearch = async () => {
+    const handleSearch = async (targetPage = 1) => {
         if (!layer) return showDialog('error', 'Lỗi', 'Vui lòng chọn lớp dữ liệu.');
         setLoading(true);
         setError(null);
         setHasSearched(true);
         try {
-            const data = await parcelApi.getAll(layer, searchFilters);
-            setParcels(data);
-        } catch (err: any) { setError(err.message); setParcels([]); }
+            const result = await parcelApi.getAll(layer, searchFilters, { page: targetPage, limit });
+            setParcels(result.data || []);
+            setTotal(result.total || 0);
+            setPages(result.pages || 1);
+            setPage(result.page || targetPage);
+        } catch (err: any) { setError(err.message); setParcels([]); setTotal(0); }
         finally { setLoading(false); }
     };
 
@@ -87,7 +94,7 @@ const ParcelManager: React.FC = () => {
             setLoading(true);
             try {
                 await parcelApi.delete(layer, gid);
-                await handleSearch();
+                await handleSearch(page);
                 showDialog('success', 'Thành công', 'Đã xóa thửa đất.');
             } catch (err: any) { showDialog('error', 'Lỗi', err.message); }
             finally { setLoading(false); }
@@ -106,7 +113,7 @@ const ParcelManager: React.FC = () => {
                 else await parcelApi.create(layer, formData);
             }
             setIsFormOpen(false);
-            await handleSearch();
+            await handleSearch(page);
             showDialog('success', 'Thành công', 'Dữ liệu đã được lưu trữ.');
         } catch (err: any) { showDialog('error', 'Lỗi', err.message); }
         finally { setLoading(false); }
@@ -114,9 +121,11 @@ const ParcelManager: React.FC = () => {
 
     const openEdit = (p: any) => {
         setEditingId(p.gid);
+        const rawSoTo = getFieldValue(p, ['sodoto', 'so_to']);
+        const rawSoThua = getFieldValue(p, ['sothua', 'so_thua']);
         setFormData({ 
-            sodoto: getFieldValue(p, ['sodoto', 'so_to']).toString(), 
-            sothua: getFieldValue(p, ['sothua', 'so_thua']).toString(), 
+            sodoto: rawSoTo !== null && rawSoTo !== undefined ? String(rawSoTo) : '', 
+            sothua: rawSoThua !== null && rawSoThua !== undefined ? String(rawSoThua) : '', 
             tenchu: getFieldValue(p, ['tenchu', 'owner']), 
             diachi: getFieldValue(p, ['diachi', 'address']), 
             loaidat: getFieldValue(p, ['loaidat', 'kyhieumucd']), 
@@ -161,13 +170,13 @@ const ParcelManager: React.FC = () => {
             </div>
 
             <div className="bg-gray-900 rounded-3xl border border-gray-800 shadow-2xl overflow-hidden flex flex-col flex-1">
-                <TableFilter layer={layer} setLayer={setLayer} availableTables={availableTables} searchFilters={searchFilters} setSearchFilters={setSearchFilters} handleSearch={handleSearch} loading={loading} />
-                <ParcelList parcels={parcels} hasSearched={hasSearched} error={error} loading={loading} onQuickView={(p)=>{setSelectedItem(p); setIsPreviewOpen(true);}} onDownload={handleDownload} onEdit={openEdit} onDelete={handleDelete} getFieldValue={getFieldValue} />
+                <TableFilter layer={layer} setLayer={setLayer} availableTables={availableTables} searchFilters={searchFilters} setSearchFilters={setSearchFilters} handleSearch={() => handleSearch(1)} loading={loading} />
+                <ParcelList parcels={parcels} hasSearched={hasSearched} error={error} loading={loading} onQuickView={(p)=>{setSelectedItem(p); setIsPreviewOpen(true);}} onDownload={handleDownload} onEdit={openEdit} onDelete={handleDelete} getFieldValue={getFieldValue} page={page} pages={pages} total={total} limit={limit} onPageChange={(nextPage) => handleSearch(nextPage)} onLimitChange={async (nextLimit) => { setLimit(nextLimit); await handleSearch(1); }} />
             </div>
 
             {/* Modals */}
             <ParcelForm isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} editingId={editingId} formData={formData} setFormData={setFormData} handleSubmit={handleFormSubmit} loading={loading} />
-            <BulkImportModal isOpen={isBulkOpen} onClose={() => setIsBulkOpen(false)} targetTable={layer} onSuccess={() => { handleSearch(); showDialog('success', 'Thành công', 'Đã nạp toàn bộ dữ liệu từ tệp tin.'); }} />
+            <BulkImportModal isOpen={isBulkOpen} onClose={() => setIsBulkOpen(false)} targetTable={layer} onSuccess={() => { handleSearch(1); showDialog('success', 'Thành công', 'Đã nạp toàn bộ dữ liệu từ tệp tin.'); }} />
             {isPreviewOpen && selectedItem && <QuickView parcel={selectedItem} onClose={() => setIsPreviewOpen(false)} onDownload={handleDownload} getFieldValue={getFieldValue} />}
 
             {/* Dialog System */}

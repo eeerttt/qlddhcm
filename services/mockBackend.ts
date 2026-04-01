@@ -111,7 +111,12 @@ export const notificationService = {
         const data = await apiCall('/notifications');
         return Array.isArray(data) ? data : [];
     },
+    getAllForAdmin: async (): Promise<SystemNotification[]> => {
+        const data = await apiCall('/notifications/admin');
+        return Array.isArray(data) ? data : [];
+    },
     sendNotification: async (data: any): Promise<any> => apiCall('/notifications', { method: 'POST', body: JSON.stringify(data) }),
+    updateNotification: async (id: number, data: any): Promise<any> => apiCall(`/notifications/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteNotification: async (id: number): Promise<any> => apiCall(`/notifications/${id}`, { method: 'DELETE' })
 };
 
@@ -194,6 +199,7 @@ export const adminService = {
     },
     addWmsLayer: async (layer: any) => apiCall('/wms-layers', { method: 'POST', body: JSON.stringify(layer) }),
     updateWmsLayer: async (layer: any) => apiCall(`/wms-layers/${layer.id}`, { method: 'PUT', body: JSON.stringify(layer) }),
+    reorderWmsLayers: async (items: Array<{ id: string; sortOrder: number }>) => apiCall('/wms-layers/reorder', { method: 'POST', body: JSON.stringify({ items }) }),
     deleteWmsLayer: async (id: string) => apiCall(`/wms-layers/${id}`, { method: 'DELETE' }),
     getBasemaps: async () => {
         const data = await apiCall('/basemaps');
@@ -201,6 +207,7 @@ export const adminService = {
     },
     addBasemap: async (bm: any) => apiCall('/basemaps', { method: 'POST', body: JSON.stringify(bm) }),
     updateBasemap: async (bm: any) => apiCall(`/basemaps/${bm.id}`, { method: 'PUT', body: JSON.stringify(bm) }),
+    reorderBasemaps: async (items: Array<{ id: string; sortOrder: number }>) => apiCall('/basemaps/reorder', { method: 'POST', body: JSON.stringify({ items }) }),
     deleteBasemap: async (id: string) => apiCall(`/basemaps/${id}`, { method: 'DELETE' }),
     getLogs: async (params?: { page?: number; limit?: number; action?: string; search?: string; from?: string; to?: string }) => {
         let qs = `?t=${Date.now()}`;

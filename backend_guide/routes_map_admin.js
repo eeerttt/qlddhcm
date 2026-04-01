@@ -9,18 +9,18 @@ export default function(pool, logSystemAction, dbConfig) {
     // --- WMS LAYERS ---
     router.get('/wms-layers', async (req, res) => {
         try { 
-            const result = await pool.query(`SELECT id, name, url, layers, visible, opacity, type, category FROM wms_layers ORDER BY name ASC`);
+            const result = await pool.query(`SELECT id, name, url, layers, visible, opacity, type, category, description, sort_order as "sortOrder" FROM wms_layers ORDER BY sort_order ASC, name ASC`);
             res.json(result.rows); 
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
     router.post('/wms-layers', authenticateToken, async (req, res) => {
-        const { name, url, layers, visible, opacity, type, category } = req.body;
+        const { name, url, layers, visible, opacity, type, category, description, sortOrder } = req.body;
         try {
             const id = 'ly-' + Date.now();
             await pool.query(
-                `INSERT INTO wms_layers (id, name, url, layers, visible, opacity, type, category) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-                [id, name, url, layers, visible, parseFloat(opacity) || 1, type || 'WMS', category || 'STANDARD']
+                `INSERT INTO wms_layers (id, name, url, layers, visible, opacity, type, category, description, sort_order) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                [id, name, url, layers, visible, parseFloat(opacity) || 1, type || 'WMS', category || 'STANDARD', description || '', Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0]
             );
             await logSystemAction(req, 'ADD_LAYER', `Thêm lớp bản đồ: ${name}`);
             res.json({ status: 'ok' });
@@ -29,14 +29,37 @@ export default function(pool, logSystemAction, dbConfig) {
 
     router.put('/wms-layers/:id', authenticateToken, async (req, res) => {
         const { id } = req.params;
-        const { name, url, layers, visible, opacity, type, category } = req.body;
+        const { name, url, layers, visible, opacity, type, category, description, sortOrder } = req.body;
         try {
             await pool.query(
-                `UPDATE wms_layers SET name=$1, url=$2, layers=$3, visible=$4, opacity=$5, type=$6, category=$7 WHERE id=$8`,
-                [name, url, layers, visible, parseFloat(opacity) || 1, type, category, id]
+                `UPDATE wms_layers SET name=$1, url=$2, layers=$3, visible=$4, opacity=$5, type=$6, category=$7, description=$8, sort_order=$9 WHERE id=$10`,
+                [name, url, layers, visible, parseFloat(opacity) || 1, type, category, description || '', Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0, id]
             );
             res.json({ status: 'ok' });
         } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    router.post('/wms-layers/reorder', authenticateToken, async (req, res) => {
+        const items = Array.isArray(req.body?.items) ? req.body.items : [];
+        if (items.length === 0) return res.status(400).json({ error: 'Danh sách sắp xếp không hợp lệ.' });
+
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            for (const item of items) {
+                if (!item?.id) continue;
+                const order = Number.isFinite(Number(item.sortOrder)) ? Number(item.sortOrder) : 0;
+                await client.query(`UPDATE wms_layers SET sort_order=$1 WHERE id=$2`, [order, item.id]);
+            }
+            await client.query('COMMIT');
+            await logSystemAction(req, 'REORDER_LAYER', `Cập nhật thứ tự ${items.length} lớp bản đồ`);
+            res.json({ status: 'ok' });
+        } catch (e) {
+            await client.query('ROLLBACK');
+            res.status(500).json({ error: e.message });
+        } finally {
+            client.release();
+        }
     });
 
     router.delete('/wms-layers/:id', authenticateToken, async (req, res) => {
@@ -48,17 +71,17 @@ export default function(pool, logSystemAction, dbConfig) {
 
     // --- BASEMAPS ---
     router.get('/basemaps', async (req, res) => {
-        try { res.json((await pool.query(`SELECT id, name, url, type, is_default as "isDefault", visible, use_proxy as "useProxy" FROM basemaps`)).rows); } catch (e) { res.status(500).json({ error: e.message }); }
+        try { res.json((await pool.query(`SELECT id, name, url, type, is_default as "isDefault", visible, use_proxy as "useProxy", sort_order as "sortOrder", description FROM basemaps ORDER BY sort_order ASC, name ASC`)).rows); } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
     router.post('/basemaps', authenticateToken, async (req, res) => {
-        const { name, url, type, isDefault, visible, useProxy } = req.body;
+        const { name, url, type, isDefault, visible, useProxy, sortOrder, description } = req.body;
         try {
             const id = 'bm-' + Date.now();
             if (isDefault) await pool.query(`UPDATE basemaps SET is_default = false`);
             await pool.query(
-                `INSERT INTO basemaps (id, name, url, type, is_default, visible, use_proxy) VALUES ($1, $2, $3, $4, $5, $6, $7)`, 
-                [id, name, url, type, isDefault, visible, useProxy || false]
+                `INSERT INTO basemaps (id, name, url, type, is_default, visible, use_proxy, sort_order, description) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, 
+                [id, name, url, type, isDefault, visible, useProxy || false, Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0, description || '']
             );
             res.json({ status: 'ok' });
         } catch (e) { res.status(500).json({ error: e.message }); }
@@ -66,15 +89,38 @@ export default function(pool, logSystemAction, dbConfig) {
 
     router.put('/basemaps/:id', authenticateToken, async (req, res) => {
         const { id } = req.params;
-        const { name, url, type, isDefault, visible, useProxy } = req.body;
+        const { name, url, type, isDefault, visible, useProxy, sortOrder, description } = req.body;
         try {
             if (isDefault) await pool.query(`UPDATE basemaps SET is_default = false`);
             await pool.query(
-                `UPDATE basemaps SET name=$1, url=$2, type=$3, is_default=$4, visible=$5, use_proxy=$6 WHERE id=$7`, 
-                [name, url, type, isDefault, visible, useProxy || false, id]
+                `UPDATE basemaps SET name=$1, url=$2, type=$3, is_default=$4, visible=$5, use_proxy=$6, sort_order=$7, description=$8 WHERE id=$9`, 
+                [name, url, type, isDefault, visible, useProxy || false, Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0, description || '', id]
             );
             res.json({ status: 'ok' });
         } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    router.post('/basemaps/reorder', authenticateToken, async (req, res) => {
+        const items = Array.isArray(req.body?.items) ? req.body.items : [];
+        if (items.length === 0) return res.status(400).json({ error: 'Danh sách sắp xếp không hợp lệ.' });
+
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            for (const item of items) {
+                if (!item?.id) continue;
+                const order = Number.isFinite(Number(item.sortOrder)) ? Number(item.sortOrder) : 0;
+                await client.query(`UPDATE basemaps SET sort_order=$1 WHERE id=$2`, [order, item.id]);
+            }
+            await client.query('COMMIT');
+            await logSystemAction(req, 'REORDER_BASEMAP', `Cập nhật thứ tự ${items.length} bản đồ nền`);
+            res.json({ status: 'ok' });
+        } catch (e) {
+            await client.query('ROLLBACK');
+            res.status(500).json({ error: e.message });
+        } finally {
+            client.release();
+        }
     });
 
     router.delete('/basemaps/:id', authenticateToken, async (req, res) => {

@@ -151,7 +151,11 @@ const App: React.FC = () => {
     navigate('/');
   };
 
-  const handleNavigate = (pageId: string) => {
+  const handleNavigate = (pageId: string, routePath?: string) => {
+      if (routePath && routePath.startsWith('/')) {
+          navigate(routePath);
+          return;
+      }
       const path = PATH_MAPPING[pageId];
       if (path) {
           navigate(path);

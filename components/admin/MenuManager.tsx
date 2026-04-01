@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { adminService } from '../../services/mockBackend';
 import { MenuItem, UserRole } from '../../types';
-import { LayoutList, Plus, Edit2, Trash2, X, Save, Info, Search, Link as LinkIcon, Globe, Monitor, Hash, Check, Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { LayoutList, Plus, Edit2, Trash2, X, Save, Info, Search, Link as LinkIcon, Globe, Monitor, Check, Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import * as Icons from 'lucide-react';
 
 const MenuManager: React.FC = () => {
@@ -25,6 +25,14 @@ const MenuManager: React.FC = () => {
     const showDialog = (type: any, title: string, message: string, onConfirm?: () => void) => {
         setDialog({ isOpen: true, type, title, message, onConfirm });
     };
+
+    const sanitizeInternalId = (id: string) => id.toLowerCase().trim().replace(/[^a-z0-9-_]/g, '');
+    const normalizeOrderIndex = (value: unknown) => {
+        const parsed = Number.parseInt(String(value), 10);
+        return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    };
+    const isValidExternalUrl = (value: string) => /^https?:\/\//i.test(value);
+    const isValidInternalRoutePath = (value: string) => value.startsWith('/') && !value.startsWith('//');
 
     useEffect(() => { loadMenu(); }, []);
 
@@ -49,16 +57,37 @@ const MenuManager: React.FC = () => {
     };
 
     const handleSave = async () => {
-        if (!formData.id || !formData.label || !formData.icon) {
+        const payload = {
+            ...formData,
+            id: sanitizeInternalId(formData.id || ''),
+            label: (formData.label || '').trim(),
+            icon: (formData.icon || '').trim(),
+            url: (formData.url || '').trim(),
+            order_index: normalizeOrderIndex(formData.order_index),
+            roles: Array.isArray(formData.roles) ? formData.roles : []
+        };
+
+        if (!payload.id || !payload.label || !payload.icon) {
             return showDialog('error', 'Lỗi nhập liệu', "Vui lòng nhập đầy đủ thông tin bắt buộc (Nhãn, Mã trang, Icon).");
         }
-        if (formData.type === 'EXTERNAL' && !formData.url) {
-            return showDialog('error', 'Lỗi nhập liệu', "Vui lòng cung cấp địa chỉ URL hợp lệ cho liên kết ngoài.");
+        if (payload.roles.length === 0) {
+            return showDialog('error', 'Lỗi nhập liệu', 'Vui lòng chọn tối thiểu 1 vai trò được phép xem menu.');
         }
+        if (!isEditMode && menuItems.some(item => item.id === payload.id)) {
+            return showDialog('error', 'Trùng mã menu', 'Mã trang đã tồn tại. Vui lòng nhập mã khác.');
+        }
+        if (payload.type === 'EXTERNAL') {
+            if (!payload.url || !isValidExternalUrl(payload.url)) {
+                return showDialog('error', 'Lỗi nhập liệu', 'Vui lòng nhập URL hợp lệ và bắt đầu bằng http:// hoặc https://.');
+            }
+        } else if (payload.url && !isValidInternalRoutePath(payload.url)) {
+            return showDialog('error', 'Lỗi nhập liệu', 'Đường dẫn nội bộ phải bắt đầu bằng dấu / (ví dụ: /thongke).');
+        }
+
         setLoading(true);
         try {
-            if (isEditMode) await adminService.updateMenuItem(formData);
-            else await adminService.addMenuItem({ ...formData, is_active: true });
+            if (isEditMode) await adminService.updateMenuItem(payload);
+            else await adminService.addMenuItem({ ...payload, is_active: true });
             setIsModalOpen(false);
             await loadMenu();
             showDialog('success', 'Thành công', 'Đã lưu thay đổi vào cấu hình Sidebar.');
@@ -265,11 +294,20 @@ const MenuManager: React.FC = () => {
                                 <div className="grid grid-cols-4 gap-4">
                                     <div className="col-span-3">
                                         <label className="text-[10px] text-gray-500 font-black uppercase mb-2 block tracking-[0.15em]">Mã trang (Router ID) *</label>
-                                        <input className="w-full bg-[#0d1117] border border-gray-700 rounded-2xl p-4 text-white font-mono text-sm outline-none focus:border-blue-500 transition-all" value={formData.id || ''} onChange={e => setFormData({...formData, id: e.target.value.toLowerCase().trim()})} placeholder="vd: map" disabled={isEditMode} />
+                                        <input className="w-full bg-[#0d1117] border border-gray-700 rounded-2xl p-4 text-white font-mono text-sm outline-none focus:border-blue-500 transition-all" value={formData.id || ''} onChange={e => setFormData({...formData, id: sanitizeInternalId(e.target.value)})} placeholder="vd: map" disabled={isEditMode} />
                                     </div>
                                     <div className="col-span-1">
                                         <label className="text-[10px] text-gray-500 font-black uppercase mb-2 block tracking-[0.15em]">Thứ tự</label>
-                                        <input type="number" className="w-full bg-[#0d1117] border border-gray-700 rounded-2xl p-4 text-white text-center font-black outline-none focus:border-blue-500 transition-all" value={formData.order_index || 0} onChange={e => setFormData({...formData, order_index: parseInt(e.target.value)})} />
+                                        <input type="number" className="w-full bg-[#0d1117] border border-gray-700 rounded-2xl p-4 text-white text-center font-black outline-none focus:border-blue-500 transition-all" value={formData.order_index || 0} onChange={e => setFormData({...formData, order_index: normalizeOrderIndex(e.target.value)})} />
+                                    </div>
+                                    <div className="col-span-4">
+                                        <label className="text-[10px] text-gray-500 font-black uppercase mb-2 block tracking-[0.15em]">Đường dẫn nội bộ (không bắt buộc)</label>
+                                        <input
+                                            className="w-full bg-[#0d1117] border border-gray-700 rounded-2xl p-4 text-white font-mono text-sm outline-none focus:border-blue-500 transition-all"
+                                            value={formData.url || ''}
+                                            onChange={e => setFormData({...formData, url: e.target.value.trim()})}
+                                            placeholder="vd: /thongke"
+                                        />
                                     </div>
                                 </div>
                             ) : (
@@ -288,7 +326,7 @@ const MenuManager: React.FC = () => {
                                         </div>
                                         <div>
                                             <label className="text-[10px] text-gray-500 font-black uppercase mb-2 block tracking-[0.15em]">Thứ tự</label>
-                                            <input type="number" className="w-full bg-[#0d1117] border border-gray-700 rounded-2xl p-4 text-white text-center font-black outline-none" value={formData.order_index || 0} onChange={e => setFormData({...formData, order_index: parseInt(e.target.value)})} />
+                                            <input type="number" className="w-full bg-[#0d1117] border border-gray-700 rounded-2xl p-4 text-white text-center font-black outline-none" value={formData.order_index || 0} onChange={e => setFormData({...formData, order_index: normalizeOrderIndex(e.target.value)})} />
                                         </div>
                                     </div>
                                 </div>

@@ -29,6 +29,7 @@ export interface SystemNotification {
     target_role: string; 
     is_active: boolean;
     created_at: string;
+    expires_at?: string | null;
     sender_name?: string;
 }
 
@@ -135,6 +136,8 @@ export interface WMSLayerConfig {
     opacity?: number;
     type?: 'WMS' | 'XYZ'; 
     category?: 'STANDARD' | 'PLANNING';
+  description?: string;
+  sortOrder?: number;
 }
 
 export interface BasemapConfig {
@@ -145,6 +148,8 @@ export interface BasemapConfig {
     isDefault: boolean;
     visible: boolean;
     useProxy?: boolean; // Thêm thuộc tính này
+  description?: string;
+  sortOrder?: number;
 }
 
 export interface SystemSetting {

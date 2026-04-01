@@ -1,9 +1,9 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { adminService } from '../../services/mockBackend';
 import { parcelApi } from '../../services/parcelApi';
 import { WMSLayerConfig, BasemapConfig } from '../../types';
-import { Layers, Database, Plus, Edit2, Trash2, X, Eye, EyeOff, Save, Table, Link2Off, RefreshCw, Map as MapIcon, CheckCircle2, Globe, AlertCircle, Check, ShieldAlert, Lock, Tags, Info, Sun, DatabaseZap, Search, Shield, Wrench } from 'lucide-react';
+import { Layers, Database, Plus, Edit2, Trash2, X, Eye, EyeOff, Save, Table, Link2Off, RefreshCw, Map as MapIcon, CheckCircle2, Globe, AlertCircle, Check, ShieldAlert, Lock, Tags, Info, Sun, DatabaseZap, Search, Shield, Wrench, GripVertical } from 'lucide-react';
 
 interface LayerManagerProps {
     dbStatus: any;
@@ -13,8 +13,22 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
     const [wmsLayers, setWmsLayers] = useState<WMSLayerConfig[]>([]);
     const [basemaps, setBasemaps] = useState<BasemapConfig[]>([]);
     const [spatialTables, setSpatialTables] = useState<any[]>([]);
+    const [globalQuery, setGlobalQuery] = useState('');
+    const [layerFilter, setLayerFilter] = useState<'ALL' | 'VISIBLE' | 'HIDDEN' | 'PLANNING' | 'STANDARD'>('ALL');
+    const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
+    const [draggingBasemapId, setDraggingBasemapId] = useState<string | null>(null);
+    const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
+    const [dragOverBasemapId, setDragOverBasemapId] = useState<string | null>(null);
+    const [layerSaveState, setLayerSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+    const [basemapSaveState, setBasemapSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const layerSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const basemapSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const layerSavedHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const basemapSavedHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastSyncedLayersRef = useRef<WMSLayerConfig[]>([]);
+    const lastSyncedBasemapsRef = useRef<BasemapConfig[]>([]);
     
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -42,6 +56,15 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
 
     useEffect(() => { loadData(); }, []);
 
+    useEffect(() => {
+        return () => {
+            if (layerSaveTimerRef.current) clearTimeout(layerSaveTimerRef.current);
+            if (basemapSaveTimerRef.current) clearTimeout(basemapSaveTimerRef.current);
+            if (layerSavedHintTimerRef.current) clearTimeout(layerSavedHintTimerRef.current);
+            if (basemapSavedHintTimerRef.current) clearTimeout(basemapSavedHintTimerRef.current);
+        };
+    }, []);
+
     const loadData = async () => {
         setLoading(true);
         setError(null);
@@ -54,9 +77,25 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
             setWmsLayers(layers || []);
             setSpatialTables(tables || []);
             setBasemaps(maps || []);
+            lastSyncedLayersRef.current = layers || [];
+            lastSyncedBasemapsRef.current = maps || [];
         } catch (e: any) {
             setError("Không thể tải toàn bộ dữ liệu cấu hình.");
         } finally { setLoading(false); }
+    };
+
+    const reindexSortOrder = <T extends { sortOrder?: number }>(items: T[]): T[] => {
+        return items.map((item, index) => ({ ...item, sortOrder: index + 1 }));
+    };
+
+    const reorderById = <T extends { id: string }>(items: T[], fromId: string, toId: string): T[] => {
+        const fromIndex = items.findIndex((item) => item.id === fromId);
+        const toIndex = items.findIndex((item) => item.id === toId);
+        if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return items;
+        const next = [...items];
+        const [moved] = next.splice(fromIndex, 1);
+        next.splice(toIndex, 0, moved);
+        return next;
     };
 
     const openModal = (type: 'LAYER' | 'TABLE' | 'BASEMAP', item?: any) => {
@@ -65,8 +104,8 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
         
         if (type === 'LAYER') {
             setFormData(item 
-                ? { ...item, type: item.type || 'WMS', category: item.category || 'STANDARD', opacity: item.opacity ?? 1 } 
-                : { name: '', url: '', layers: '', visible: true, opacity: 1, type: 'WMS', category: 'STANDARD' }
+                ? { ...item, type: item.type || 'WMS', category: item.category || 'STANDARD', opacity: item.opacity ?? 1, description: item.description || '', sortOrder: item.sortOrder ?? 0 } 
+                : { name: '', url: '', layers: '', visible: true, opacity: 1, type: 'WMS', category: 'STANDARD', description: '', sortOrder: 0 }
             );
         } else if (type === 'TABLE') {
             if (item) {
@@ -86,7 +125,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                 });
             }
         } else if (type === 'BASEMAP') {
-            setFormData(item ? { ...item } : { name: '', url: '', type: 'XYZ', isDefault: false, visible: true, useProxy: false });
+            setFormData(item ? { ...item, description: item.description || '', sortOrder: item.sortOrder ?? 0 } : { name: '', url: '', type: 'XYZ', isDefault: false, visible: true, useProxy: false, description: '', sortOrder: 0 });
         }
         setIsModalOpen(true);
     };
@@ -102,12 +141,17 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                     if (!finalData.layers) finalData.layers = 'planning_tiles';
                 }
 
+                finalData.sortOrder = Number.isFinite(Number(finalData.sortOrder)) ? Number(finalData.sortOrder) : 0;
+                finalData.description = (finalData.description || '').trim();
+
                 if (!finalData.name || !finalData.url) {
                     throw new Error("Vui lòng nhập Tên và URL cho lớp bản đồ.");
                 }
 
                 isEditMode ? await adminService.updateWmsLayer(finalData) : await adminService.addWmsLayer(finalData);
             } else if (modalType === 'BASEMAP') {
+                finalData.sortOrder = Number.isFinite(Number(finalData.sortOrder)) ? Number(finalData.sortOrder) : 0;
+                finalData.description = (finalData.description || '').trim();
                 isEditMode ? await adminService.updateBasemap(finalData) : await adminService.addBasemap(finalData);
             } else if (modalType === 'TABLE') {
                 if (!finalData.tableName || !finalData.displayName) {
@@ -207,6 +251,101 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
         }
     };
 
+    const persistLayerOrder = async (orderedItems: WMSLayerConfig[]) => {
+        const payload = orderedItems.map((l, idx) => ({ id: l.id, sortOrder: Number.isFinite(Number(l.sortOrder)) ? Number(l.sortOrder) : idx + 1 }));
+        await adminService.reorderWmsLayers(payload);
+    };
+
+    const persistBasemapOrder = async (orderedItems: BasemapConfig[]) => {
+        const payload = orderedItems.map((bm, idx) => ({ id: bm.id, sortOrder: Number.isFinite(Number(bm.sortOrder)) ? Number(bm.sortOrder) : idx + 1 }));
+        await adminService.reorderBasemaps(payload);
+    };
+
+    const scheduleLayerAutoSave = (orderedItems: WMSLayerConfig[]) => {
+        if (layerSaveTimerRef.current) clearTimeout(layerSaveTimerRef.current);
+        if (layerSavedHintTimerRef.current) clearTimeout(layerSavedHintTimerRef.current);
+        setLayerSaveState('saving');
+        layerSaveTimerRef.current = setTimeout(async () => {
+            try {
+                await persistLayerOrder(orderedItems);
+                lastSyncedLayersRef.current = orderedItems;
+                setLayerSaveState('saved');
+                layerSavedHintTimerRef.current = setTimeout(() => setLayerSaveState('idle'), 1800);
+            } catch (e: any) {
+                setWmsLayers(lastSyncedLayersRef.current);
+                setLayerSaveState('error');
+                setError(e.message || 'Không thể lưu thứ tự lớp bản đồ.');
+            }
+        }, 450);
+    };
+
+    const scheduleBasemapAutoSave = (orderedItems: BasemapConfig[]) => {
+        if (basemapSaveTimerRef.current) clearTimeout(basemapSaveTimerRef.current);
+        if (basemapSavedHintTimerRef.current) clearTimeout(basemapSavedHintTimerRef.current);
+        setBasemapSaveState('saving');
+        basemapSaveTimerRef.current = setTimeout(async () => {
+            try {
+                await persistBasemapOrder(orderedItems);
+                lastSyncedBasemapsRef.current = orderedItems;
+                setBasemapSaveState('saved');
+                basemapSavedHintTimerRef.current = setTimeout(() => setBasemapSaveState('idle'), 1800);
+            } catch (e: any) {
+                setBasemaps(lastSyncedBasemapsRef.current);
+                setBasemapSaveState('error');
+                setError(e.message || 'Không thể lưu thứ tự bản đồ nền.');
+            }
+        }, 450);
+    };
+
+    const handleLayerDrop = (targetId: string) => {
+        if (!draggingLayerId || draggingLayerId === targetId || loading) return;
+        const next = reindexSortOrder(reorderById(wmsLayers, draggingLayerId, targetId));
+        setWmsLayers(next);
+        setDraggingLayerId(null);
+        setDragOverLayerId(null);
+        scheduleLayerAutoSave(next);
+    };
+
+    const handleBasemapDrop = (targetId: string) => {
+        if (!draggingBasemapId || draggingBasemapId === targetId || loading) return;
+        const next = reindexSortOrder(reorderById(basemaps, draggingBasemapId, targetId));
+        setBasemaps(next);
+        setDraggingBasemapId(null);
+        setDragOverBasemapId(null);
+        scheduleBasemapAutoSave(next);
+    };
+
+    const normalizedQuery = globalQuery.trim().toLowerCase();
+    const canReorderLayers = !loading;
+    const canReorderBasemaps = !loading;
+    const filteredSpatialTables = spatialTables.filter((t) => {
+        if (!normalizedQuery) return true;
+        return [t.table_name, t.display_name, t.description].some((v) => (v || '').toLowerCase().includes(normalizedQuery));
+    });
+
+    const filteredWmsLayers = wmsLayers.filter((l) => {
+        const matchQuery = !normalizedQuery || [l.name, l.layers, l.description, l.url].some((v) => (v || '').toLowerCase().includes(normalizedQuery));
+        if (!matchQuery) return false;
+        if (layerFilter === 'VISIBLE') return !!l.visible;
+        if (layerFilter === 'HIDDEN') return !l.visible;
+        if (layerFilter === 'PLANNING') return l.category === 'PLANNING';
+        if (layerFilter === 'STANDARD') return l.category !== 'PLANNING';
+        return true;
+    });
+
+    const filteredBasemaps = basemaps.filter((bm) => {
+        if (!normalizedQuery) return true;
+        return [bm.name, bm.type, bm.description, bm.url].some((v) => (v || '').toLowerCase().includes(normalizedQuery));
+    });
+
+    const stats = {
+        totalLayers: wmsLayers.length,
+        visibleLayers: wmsLayers.filter((l) => l.visible).length,
+        planningLayers: wmsLayers.filter((l) => l.category === 'PLANNING').length,
+        totalTables: spatialTables.length,
+        totalBasemaps: basemaps.length
+    };
+
     return (
         <div className="p-8 space-y-10 pb-24 max-w-7xl mx-auto font-sans">
             {error && (
@@ -235,6 +374,47 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                 </div>
             </div>
 
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-black">Lớp dữ liệu</p>
+                    <p className="text-2xl font-black text-cyan-400 mt-1">{stats.totalLayers}</p>
+                </div>
+                <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-black">Đang hiển thị</p>
+                    <p className="text-2xl font-black text-emerald-400 mt-1">{stats.visibleLayers}</p>
+                </div>
+                <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-black">Lớp quy hoạch</p>
+                    <p className="text-2xl font-black text-purple-400 mt-1">{stats.planningLayers}</p>
+                </div>
+                <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-black">Bảng registry</p>
+                    <p className="text-2xl font-black text-green-400 mt-1">{stats.totalTables}</p>
+                </div>
+                <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-black">Bản đồ nền</p>
+                    <p className="text-2xl font-black text-orange-400 mt-1">{stats.totalBasemaps}</p>
+                </div>
+            </div>
+
+            <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
+                <div className="relative flex-1">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                    <input
+                        value={globalQuery}
+                        onChange={(e) => setGlobalQuery(e.target.value)}
+                        placeholder="Tìm theo tên lớp, bảng, mô tả, URL..."
+                        className="w-full bg-gray-900 border border-gray-700 rounded-xl pl-9 pr-3 py-2.5 text-sm text-white outline-none focus:border-cyan-500"
+                    />
+                </div>
+                <div className="bg-gray-900 p-1 rounded-xl flex gap-1">
+                    <button onClick={() => setLayerFilter('ALL')} className={`px-3 py-1.5 text-[10px] font-black rounded-lg uppercase ${layerFilter === 'ALL' ? 'bg-cyan-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}>Tất cả</button>
+                    <button onClick={() => setLayerFilter('VISIBLE')} className={`px-3 py-1.5 text-[10px] font-black rounded-lg uppercase ${layerFilter === 'VISIBLE' ? 'bg-emerald-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}>Đang hiện</button>
+                    <button onClick={() => setLayerFilter('HIDDEN')} className={`px-3 py-1.5 text-[10px] font-black rounded-lg uppercase ${layerFilter === 'HIDDEN' ? 'bg-slate-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}>Đang ẩn</button>
+                    <button onClick={() => setLayerFilter('PLANNING')} className={`px-3 py-1.5 text-[10px] font-black rounded-lg uppercase ${layerFilter === 'PLANNING' ? 'bg-purple-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}>Quy hoạch</button>
+                </div>
+            </div>
+
             {/* 2. SPATIAL TABLES REGISTRY */}
             <div className="bg-gray-800 rounded-lg border border-gray-700 shadow-xl overflow-hidden">
                 <div className="p-4 flex justify-between border-b border-gray-700 bg-gray-800/50">
@@ -251,7 +431,9 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                             <tr><th className="p-4 w-1/4">Tên bảng (DB)</th><th className="p-4 w-1/4">Tên hiển thị</th><th className="p-4 w-1/3">Mô tả</th><th className="p-4 text-right">Quản trị</th></tr>
                         </thead>
                         <tbody className="divide-y divide-gray-700 text-gray-300">
-                            {spatialTables.map(t => (
+                            {filteredSpatialTables.length === 0 ? (
+                                <tr><td colSpan={4} className="p-8 text-center text-gray-600 italic">Không có bảng nào khớp bộ lọc tìm kiếm</td></tr>
+                            ) : filteredSpatialTables.map(t => (
                                 <tr key={t.table_name} className="hover:bg-gray-700/30 transition-colors">
                                     <td className="p-4 font-mono text-blue-300 text-xs">{t.table_name}</td>
                                     <td className="p-4 font-medium text-white">{t.display_name || t.table_name}</td>
@@ -273,23 +455,45 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
             {/* 3. WMS LAYERS SECTION */}
             <div className="bg-gray-800 rounded-lg border border-gray-700 shadow-xl overflow-hidden">
                 <div className="p-4 flex justify-between border-b border-gray-700 bg-gray-800/50">
-                    <span className="font-semibold text-gray-100 flex items-center gap-2">
-                        <Globe size={18} className="text-cyan-400"/> Lớp bản đồ & Quy hoạch (WMS/XYZ)
-                    </span>
-                    <button onClick={() => openModal('LAYER')} className="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-1.5 rounded text-sm font-bold flex items-center gap-1 transition-all shadow-lg shadow-cyan-950/20">
-                        <Plus size={16}/> Thêm Lớp Dữ liệu
-                    </button>
+                    <div>
+                        <span className="font-semibold text-gray-100 flex items-center gap-2">
+                            <Globe size={18} className="text-cyan-400"/> Lớp bản đồ & Quy hoạch (WMS/XYZ)
+                        </span>
+                        <p className="text-[10px] uppercase tracking-wider text-gray-500 mt-1">Kéo-thả sẽ tự lưu thứ tự ngay sau khi thả</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        {layerSaveState === 'saving' && <span className="text-[10px] uppercase font-black tracking-wider text-amber-400">Đang tự lưu...</span>}
+                        {layerSaveState === 'saved' && <span className="text-[10px] uppercase font-black tracking-wider text-emerald-400">Đã lưu thứ tự</span>}
+                        {layerSaveState === 'error' && <span className="text-[10px] uppercase font-black tracking-wider text-red-400">Lưu thất bại</span>}
+                        <button onClick={() => openModal('LAYER')} className="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-1.5 rounded text-sm font-bold flex items-center gap-1 transition-all shadow-lg shadow-cyan-950/20">
+                            <Plus size={16}/> Thêm Lớp Dữ liệu
+                        </button>
+                    </div>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
                         <thead className="bg-gray-900 text-gray-400 uppercase text-[10px] tracking-widest font-black">
-                            <tr><th className="p-4">Tên hiển thị</th><th className="p-4">Loại</th><th className="p-4">Độ mờ</th><th className="p-4">Trạng thái</th><th className="p-4 text-right">Thao tác</th></tr>
+                            <tr><th className="p-4">Kéo</th><th className="p-4">Thứ tự</th><th className="p-4">Tên hiển thị</th><th className="p-4">Loại</th><th className="p-4">Mô tả</th><th className="p-4">Độ mờ</th><th className="p-4">Trạng thái</th><th className="p-4 text-right">Thao tác</th></tr>
                         </thead>
                         <tbody className="divide-y divide-gray-700 text-gray-300">
-                            {wmsLayers.length === 0 ? (
-                                <tr><td colSpan={5} className="p-10 text-center text-gray-600 italic">Chưa có lớp dữ liệu nào được cấu hình</td></tr>
-                            ) : wmsLayers.map(l => (
-                                <tr key={l.id} className="hover:bg-gray-700/30 transition-colors">
+                            {filteredWmsLayers.length === 0 ? (
+                                <tr><td colSpan={8} className="p-10 text-center text-gray-600 italic">Không có lớp dữ liệu nào khớp điều kiện lọc</td></tr>
+                            ) : filteredWmsLayers.map(l => (
+                                <tr
+                                    key={l.id}
+                                    draggable={canReorderLayers}
+                                    onDragStart={() => setDraggingLayerId(l.id)}
+                                    onDragOver={(e) => { if (canReorderLayers) { e.preventDefault(); setDragOverLayerId(l.id); } }}
+                                    onDrop={() => handleLayerDrop(l.id)}
+                                    onDragEnd={() => { setDraggingLayerId(null); setDragOverLayerId(null); }}
+                                    className={`hover:bg-gray-700/30 transition-colors ${canReorderLayers ? 'cursor-move' : ''} ${draggingLayerId === l.id ? 'opacity-40' : ''} ${dragOverLayerId === l.id ? 'bg-cyan-900/20' : ''}`}
+                                >
+                                    <td className="p-4 text-gray-500">
+                                        <GripVertical size={14} />
+                                    </td>
+                                    <td className="p-4">
+                                        <span className="font-mono text-[11px] px-2 py-1 rounded bg-gray-900 border border-gray-700 text-cyan-300">#{l.sortOrder ?? 0}</span>
+                                    </td>
                                     <td className="p-4">
                                         <div className="flex flex-col">
                                             <span className="font-bold text-white">{l.name}</span>
@@ -303,6 +507,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                                             {l.type || 'WMS'}
                                         </span>
                                     </td>
+                                    <td className="p-4 text-xs text-gray-400 max-w-[260px] truncate">{l.description || '--'}</td>
                                     <td className="p-4">
                                         <div className="flex items-center gap-2">
                                             <Sun size={12} className="text-gray-500" />
@@ -336,22 +541,47 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
             {/* 4. BASEMAPS SECTION */}
             <div className="bg-gray-800 rounded-lg border border-gray-700 shadow-xl overflow-hidden">
                 <div className="p-4 flex justify-between border-b border-gray-700 bg-gray-800/50">
-                    <span className="font-semibold text-gray-100 flex items-center gap-2">
-                        <MapIcon size={18} className="text-orange-400"/> Quản lý Bản đồ nền (Basemaps)
-                    </span>
-                    <button onClick={() => openModal('BASEMAP')} className="bg-orange-600 hover:bg-orange-500 text-white px-4 py-1.5 rounded text-sm font-bold flex items-center gap-1 shadow-lg transition-all">
-                        <Plus size={16}/> Thêm Bản đồ nền
-                    </button>
+                    <div>
+                        <span className="font-semibold text-gray-100 flex items-center gap-2">
+                            <MapIcon size={18} className="text-orange-400"/> Quản lý Bản đồ nền (Basemaps)
+                        </span>
+                        <p className="text-[10px] uppercase tracking-wider text-gray-500 mt-1">Kéo-thả sẽ tự lưu thứ tự ngay sau khi thả</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        {basemapSaveState === 'saving' && <span className="text-[10px] uppercase font-black tracking-wider text-amber-400">Đang tự lưu...</span>}
+                        {basemapSaveState === 'saved' && <span className="text-[10px] uppercase font-black tracking-wider text-emerald-400">Đã lưu thứ tự</span>}
+                        {basemapSaveState === 'error' && <span className="text-[10px] uppercase font-black tracking-wider text-red-400">Lưu thất bại</span>}
+                        <button onClick={() => openModal('BASEMAP')} className="bg-orange-600 hover:bg-orange-500 text-white px-4 py-1.5 rounded text-sm font-bold flex items-center gap-1 shadow-lg transition-all">
+                            <Plus size={16}/> Thêm Bản đồ nền
+                        </button>
+                    </div>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
                         <thead className="bg-gray-900 text-gray-400 uppercase text-[10px] tracking-widest font-black">
-                            <tr><th className="p-4">Tên bản đồ</th><th className="p-4">Loại</th><th className="p-4">Proxy</th><th className="p-4">Mặc định</th><th className="p-4">Trạng thái</th><th className="p-4 text-right">Thao tác</th></tr>
+                            <tr><th className="p-4">Kéo</th><th className="p-4">Thứ tự</th><th className="p-4">Tên bản đồ</th><th className="p-4">Mô tả</th><th className="p-4">Loại</th><th className="p-4">Proxy</th><th className="p-4">Mặc định</th><th className="p-4">Trạng thái</th><th className="p-4 text-right">Thao tác</th></tr>
                         </thead>
                         <tbody className="divide-y divide-gray-700 text-gray-300">
-                            {basemaps.map(bm => (
-                                <tr key={bm.id} className="hover:bg-gray-700/30 transition-colors">
+                            {filteredBasemaps.length === 0 ? (
+                                <tr><td colSpan={9} className="p-8 text-center text-gray-600 italic">Không có bản đồ nền nào khớp điều kiện lọc</td></tr>
+                            ) : filteredBasemaps.map(bm => (
+                                <tr
+                                    key={bm.id}
+                                    draggable={canReorderBasemaps}
+                                    onDragStart={() => setDraggingBasemapId(bm.id)}
+                                    onDragOver={(e) => { if (canReorderBasemaps) { e.preventDefault(); setDragOverBasemapId(bm.id); } }}
+                                    onDrop={() => handleBasemapDrop(bm.id)}
+                                    onDragEnd={() => { setDraggingBasemapId(null); setDragOverBasemapId(null); }}
+                                    className={`hover:bg-gray-700/30 transition-colors ${canReorderBasemaps ? 'cursor-move' : ''} ${draggingBasemapId === bm.id ? 'opacity-40' : ''} ${dragOverBasemapId === bm.id ? 'bg-orange-900/20' : ''}`}
+                                >
+                                    <td className="p-4 text-gray-500">
+                                        <GripVertical size={14} />
+                                    </td>
+                                    <td className="p-4">
+                                        <span className="font-mono text-[11px] px-2 py-1 rounded bg-gray-900 border border-gray-700 text-orange-300">#{bm.sortOrder ?? 0}</span>
+                                    </td>
                                     <td className="p-4 font-bold text-white">{bm.name}</td>
+                                    <td className="p-4 text-xs text-gray-500 max-w-[220px] truncate">{bm.description || '--'}</td>
                                     <td className="p-4 text-xs font-mono text-gray-400">{bm.type}</td>
                                     <td className="p-4">
                                         {bm.useProxy ? (
@@ -398,7 +628,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
 
             {isModalOpen && (
                 <div className="fixed inset-0 z-[500] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-                    <div className="bg-gray-800 rounded-xl w-full max-w-md p-6 border border-gray-700 shadow-2xl animate-in zoom-in-95 duration-200 my-auto">
+                    <div className="bg-gray-800 rounded-xl w-full max-w-2xl p-6 border border-gray-700 shadow-2xl animate-in zoom-in-95 duration-200 my-auto max-h-[92vh] overflow-y-auto">
                         <div className="flex justify-between items-center mb-6 border-b border-gray-700 pb-3">
                             <h3 className="text-xl font-bold text-white uppercase tracking-tighter flex items-center gap-2">
                                 {modalType === 'TABLE' && <Table className="text-green-400"/>}
@@ -428,6 +658,17 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                                     <div>
                                         <label className="text-[10px] text-gray-500 font-black uppercase block mb-1.5 ml-1">Tên hiển thị (VD: Quy hoạch TDM)</label>
                                         <input className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-white outline-none focus:border-cyan-500 font-bold" value={formData.name || ''} onChange={e => setFormData({...formData, name: e.target.value})}/>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="text-[10px] text-gray-500 font-black uppercase block mb-1.5 ml-1">Thứ tự hiển thị</label>
+                                            <input type="number" min={0} className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-white font-mono text-sm outline-none" value={formData.sortOrder ?? 0} onChange={e => setFormData({...formData, sortOrder: Number(e.target.value)})}/>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] text-gray-500 font-black uppercase block mb-1.5 ml-1">Mô tả ngắn</label>
+                                            <input className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-white text-sm outline-none" value={formData.description || ''} onChange={e => setFormData({...formData, description: e.target.value})}/>
+                                        </div>
                                     </div>
 
                                     {formData.type === 'WMS' && (
@@ -537,6 +778,16 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                                     <div>
                                         <label className="text-[10px] text-gray-500 font-black uppercase block mb-1.5 ml-1">Tên bản đồ nền</label>
                                         <input className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-white font-bold" value={formData.name || ''} onChange={e => setFormData({...formData, name: e.target.value})}/>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="text-[10px] text-gray-500 font-black uppercase block mb-1.5 ml-1">Thứ tự hiển thị</label>
+                                            <input type="number" min={0} className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-white font-mono text-sm" value={formData.sortOrder ?? 0} onChange={e => setFormData({...formData, sortOrder: Number(e.target.value)})}/>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] text-gray-500 font-black uppercase block mb-1.5 ml-1">Mô tả ngắn</label>
+                                            <input className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-white text-sm" value={formData.description || ''} onChange={e => setFormData({...formData, description: e.target.value})}/>
+                                        </div>
                                     </div>
                                     <div>
                                         <label className="text-[10px] text-gray-500 font-black uppercase block mb-1.5 ml-1">Loại</label>

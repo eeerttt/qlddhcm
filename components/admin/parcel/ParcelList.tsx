@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Edit, Trash2, Eye, FileDown, Search, AlertTriangle } from 'lucide-react';
 import { ParcelDTO } from '../../../services/parcelApi';
 
@@ -13,11 +13,23 @@ interface ParcelListProps {
     onEdit: (p: any) => void;
     onDelete: (gid: number) => void;
     getFieldValue: (obj: any, aliases: string[]) => any;
+    page: number;
+    pages: number;
+    total: number;
+    limit: number;
+    onPageChange: (page: number) => void;
+    onLimitChange: (limit: number) => void;
 }
 
 const ParcelList: React.FC<ParcelListProps> = ({ 
-    parcels, hasSearched, error, loading, onQuickView, onDownload, onEdit, onDelete, getFieldValue 
+    parcels, hasSearched, error, loading, onQuickView, onDownload, onEdit, onDelete, getFieldValue, page, pages, total, limit, onPageChange, onLimitChange
 }) => {
+    const [jumpPageInput, setJumpPageInput] = useState('');
+
+    useEffect(() => {
+        setJumpPageInput(page.toString());
+    }, [page]);
+
     const getLandType = (p: any) => getFieldValue(p, ['loaidat', 'kyhieumucd', 'mucdich']) || 'N/A';
     const getOwner = (p: any) => getFieldValue(p, ['tenchu', 'owner', 'chusudung']) || '--';
     const getAreaVal = (p: any) => parseFloat(getFieldValue(p, ['dientich', 'dien_tich', 'area']) || 0);
@@ -43,8 +55,8 @@ const ParcelList: React.FC<ParcelListProps> = ({
     );
 
     return (
-        <div className="overflow-auto flex-1 custom-scrollbar animate-in slide-in-from-bottom-4 duration-500">
-            <table className="w-full text-sm text-left border-collapse">
+        <div className="overflow-auto flex-1 custom-scrollbar animate-in slide-in-from-bottom-4 duration-500 flex flex-col">
+            <table className="w-full text-sm text-left border-collapse flex-1">
                 <thead className="bg-gray-950 text-gray-500 uppercase text-[10px] sticky top-0 z-10 font-black tracking-widest border-b border-gray-800">
                     <tr>
                         <th className="p-4">Tờ/Thửa</th>
@@ -88,6 +100,72 @@ const ParcelList: React.FC<ParcelListProps> = ({
                     ))}
                 </tbody>
             </table>
+            {hasSearched && pages > 0 && (
+                <div className="p-4 border-t border-gray-800 bg-gray-950/70 flex items-center justify-between">
+                    <p className="text-[10px] uppercase tracking-widest font-black text-gray-500">
+                        Tổng: <span className="text-blue-400">{total.toLocaleString()}</span> bản ghi
+                    </p>
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] uppercase tracking-widest font-black text-gray-600">Dòng/trang</span>
+                            <select
+                                value={limit}
+                                onChange={(e) => onLimitChange(parseInt(e.target.value, 10))}
+                                disabled={loading}
+                                className="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[10px] font-black text-gray-300 outline-none"
+                            >
+                                <option value={50}>50</option>
+                                <option value={100}>100</option>
+                                <option value={200}>200</option>
+                                <option value={500}>500</option>
+                            </select>
+                        </div>
+                        <button
+                            onClick={() => onPageChange(Math.max(page - 1, 1))}
+                            disabled={loading || page <= 1}
+                            className="px-3 py-1.5 rounded-lg border border-gray-700 text-[10px] font-black uppercase text-gray-400 hover:text-white hover:border-gray-500 disabled:opacity-40"
+                        >
+                            Trước
+                        </button>
+                        <span className="text-[10px] font-mono text-gray-500">{page}/{pages}</span>
+                        <button
+                            onClick={() => onPageChange(Math.min(page + 1, pages))}
+                            disabled={loading || page >= pages}
+                            className="px-3 py-1.5 rounded-lg border border-gray-700 text-[10px] font-black uppercase text-gray-400 hover:text-white hover:border-gray-500 disabled:opacity-40"
+                        >
+                            Sau
+                        </button>
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] uppercase tracking-widest font-black text-gray-600">Nhảy trang</span>
+                            <input
+                                type="number"
+                                min={1}
+                                max={pages}
+                                value={jumpPageInput}
+                                onChange={(e) => setJumpPageInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        const target = Math.min(Math.max(parseInt(jumpPageInput || '1', 10), 1), pages);
+                                        onPageChange(target);
+                                    }
+                                }}
+                                disabled={loading}
+                                className="w-20 bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-[10px] font-mono text-gray-300 outline-none"
+                            />
+                            <button
+                                onClick={() => {
+                                    const target = Math.min(Math.max(parseInt(jumpPageInput || '1', 10), 1), pages);
+                                    onPageChange(target);
+                                }}
+                                disabled={loading}
+                                className="px-3 py-1.5 rounded-lg border border-blue-800 text-[10px] font-black uppercase text-blue-400 hover:text-blue-300 hover:border-blue-600 disabled:opacity-40"
+                            >
+                                Đi
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

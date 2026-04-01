@@ -134,6 +134,30 @@ export default function(pool, logSystemAction) {
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
+    // --- CẬP NHẬT THÔNG TIN ADMIN (ROLE, BRANCH, IS_VERIFIED, NAME, EMAIL) ---
+    router.put('/:id', async (req, res) => {
+        const { id } = req.params;
+        const { name, email, role, branchId, is_verified, can_chat } = req.body;
+        try {
+            const r = await pool.query(
+                `UPDATE users SET
+                    name        = COALESCE($1, name),
+                    email       = COALESCE($2, email),
+                    role        = COALESCE($3, role),
+                    branch_id   = COALESCE($4, branch_id),
+                    is_verified = COALESCE($5, is_verified),
+                    can_chat    = COALESCE($6, can_chat)
+                 WHERE id = $7
+                 RETURNING id, email, name, role, branch_id as "branchId", is_verified, can_chat, avatar`,
+                [name ?? null, email ?? null, role ?? null, branchId ?? null,
+                 is_verified ?? null, can_chat ?? null, id]
+            );
+            if (r.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+            await logSystemAction(req, 'UPDATE_USER', `Admin cập nhật thông tin user ${id}`);
+            res.json(r.rows[0]);
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
     // --- XÓA NGƯỜI DÙNG ---
     router.delete('/:id', async (req, res) => {
         const { id } = req.params;

@@ -29,3 +29,13 @@ export const authenticateToken = (req, res, next) => {
         next();
     });
 };
+
+export const requireAdmin = (req, res, next) => {
+    if (!req.user) {
+        return res.status(401).json({ error: "Access Denied: Vui lòng đăng nhập." });
+    }
+    if (req.user.role !== 'ADMIN') {
+        return res.status(403).json({ error: "Forbidden: Chỉ quản trị viên được phép thực hiện thao tác này." });
+    }
+    next();
+};

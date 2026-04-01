@@ -23,6 +23,24 @@ const SCHEMA_CACHE = new Map();
 
 export default function(pool, logSystemAction) {
     const router = express.Router();
+    const TABLE_NAME_REGEX = /^[a-z0-9_]+$/;
+
+    const resolveSafeTableName = async (rawTableName) => {
+        const table = (rawTableName || '').toLowerCase().trim();
+        if (!TABLE_NAME_REGEX.test(table)) {
+            throw new Error('Tên bảng không hợp lệ.');
+        }
+
+        const check = await pool.query(
+            `SELECT table_name FROM spatial_tables_registry WHERE table_name = $1 LIMIT 1`,
+            [table]
+        );
+        if (check.rowCount === 0) {
+            throw new Error(`Bảng ${table} chưa được đăng ký trong registry.`);
+        }
+
+        return table;
+    };
 
     const COLUMN_VARIANTS = {
         sodoto: ['shbando', 'sh_ban_do', 'tobando', 'to_ban_do', 'map_sheet', 'shmap', 'sodoto', 'so_to'],
@@ -233,11 +251,14 @@ export default function(pool, logSystemAction) {
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
-    router.get('/data/:table', async (req, res) => {
-        const table = req.params.table.toLowerCase();
+    router.get('/data/:table', authenticateToken, async (req, res) => {
         const { sodoto, sothua, tenchu, diachi } = req.query;
         try {
+            const table = await resolveSafeTableName(req.params.table);
             const cols = await resolveTableColumns(table);
+            const page = Math.max(parseInt(req.query.page || '1', 10), 1);
+            const limit = Math.min(Math.max(parseInt(req.query.limit || '100', 10), 1), 500);
+            const offset = (page - 1) * limit;
             
             const selectFields = ['gid'];
             const params = [];
@@ -259,30 +280,44 @@ export default function(pool, logSystemAction) {
             
             selectFields.push('ST_AsGeoJSON(geometry) as geometry');
 
-            let query = `SELECT ${selectFields.join(', ')} FROM "${table}" WHERE 1=1`;
+            const whereClauses = ['1=1'];
 
-            if (sodoto && cols.sodoto) { query += ` AND "${cols.sodoto}"::text = $${idx++}`; params.push(sodoto); }
-            if (sothua && cols.sothua) { query += ` AND "${cols.sothua}"::text = $${idx++}`; params.push(sothua); }
-            if (tenchu && cols.tenchu) { query += ` AND "${cols.tenchu}" ILIKE $${idx++}`; params.push(`%${tenchu}%`); }
-            if (diachi && cols.diachi) { query += ` AND "${cols.diachi}" ILIKE $${idx++}`; params.push(`%${diachi}%`); }
-            
-            query += ` ORDER BY gid DESC LIMIT 100`;
+            if (sodoto && cols.sodoto) { whereClauses.push(`"${cols.sodoto}"::text = $${idx++}`); params.push(sodoto); }
+            if (sothua && cols.sothua) { whereClauses.push(`"${cols.sothua}"::text = $${idx++}`); params.push(sothua); }
+            if (tenchu && cols.tenchu) { whereClauses.push(`"${cols.tenchu}" ILIKE $${idx++}`); params.push(`%${tenchu}%`); }
+            if (diachi && cols.diachi) { whereClauses.push(`"${cols.diachi}" ILIKE $${idx++}`); params.push(`%${diachi}%`); }
 
-            const result = await pool.query(query, params);
-            res.json(result.rows.map(row => ({
+            const whereSql = whereClauses.join(' AND ');
+            const countQuery = `SELECT COUNT(*)::int AS total FROM "${table}" WHERE ${whereSql}`;
+            const countResult = await pool.query(countQuery, params);
+            const total = countResult.rows[0]?.total || 0;
+
+            const dataQuery = `SELECT ${selectFields.join(', ')} FROM "${table}" WHERE ${whereSql} ORDER BY gid DESC LIMIT $${idx++} OFFSET $${idx++}`;
+            const dataParams = [...params, limit, offset];
+
+            const result = await pool.query(dataQuery, dataParams);
+            const data = result.rows.map(row => ({
                 ...row,
                 geometry: row.geometry ? JSON.parse(row.geometry) : null
-            })));
+            }));
+
+            res.json({
+                data,
+                total,
+                page,
+                limit,
+                pages: Math.max(Math.ceil(total / limit), 1)
+            });
         } catch (e) {
-            SCHEMA_CACHE.delete(table);
+            SCHEMA_CACHE.delete((req.params.table || '').toLowerCase());
             res.status(500).json({ error: e.message });
         }
     });
 
     router.post('/data/:table', authenticateToken, async (req, res) => {
-        const table = req.params.table.toLowerCase();
         const data = req.body;
         try {
+            const table = await resolveSafeTableName(req.params.table);
             const cols = await resolveTableColumns(table);
             const targetSrid = cols._srid || 4326;
 
@@ -324,10 +359,10 @@ export default function(pool, logSystemAction) {
     });
 
     router.post('/data/:table/bulk', authenticateToken, async (req, res) => {
-        const table = req.params.table.toLowerCase();
         const { items } = req.body;
         if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: "Dữ liệu không hợp lệ." });
         try {
+            const table = await resolveSafeTableName(req.params.table);
             const cols = await resolveTableColumns(table);
             const targetSrid = cols._srid || 4326;
             await pool.query('BEGIN');
@@ -373,10 +408,10 @@ export default function(pool, logSystemAction) {
     });
 
     router.put('/data/:table/:gid', authenticateToken, async (req, res) => {
-        const table = req.params.table.toLowerCase();
         const { gid } = req.params;
         const data = req.body;
         try {
+            const table = await resolveSafeTableName(req.params.table);
             const cols = await resolveTableColumns(table);
             const targetSrid = cols._srid || 4326;
 
@@ -416,8 +451,7 @@ export default function(pool, logSystemAction) {
     });
 
     router.post('/data/:table/upload', authenticateToken, upload.fields([{ name: 'file', maxCount: 1 }, { name: 'imageFile', maxCount: 1 }]), async (req, res) => {
-        const table = req.params.table.toLowerCase();
-        console.log(`[Upload] Starting upload for table: ${table}`);
+        let table = '';
         const files = req.files;
         const file = files?.file?.[0];
         const imageFile = files?.imageFile?.[0];
@@ -446,6 +480,8 @@ export default function(pool, logSystemAction) {
         }
 
         try {
+            table = await resolveSafeTableName(req.params.table);
+            console.log(`[Upload] Starting upload for table: ${table}`);
             const cols = await resolveTableColumns(table);
             console.log(`[Upload] Table columns resolved:`, cols);
             const targetSrid = cols._srid || 4326;
@@ -519,18 +555,18 @@ export default function(pool, logSystemAction) {
         }
     });
 
-    router.get('/data/:table/extent', async (req, res) => {
-        const table = req.params.table.toLowerCase();
+    router.get('/data/:table/extent', authenticateToken, async (req, res) => {
         try {
+            const table = await resolveSafeTableName(req.params.table);
             const result = await pool.query(`SELECT ST_XMin(ext) as xmin, ST_YMin(ext) as ymin, ST_XMax(ext) as xmax, ST_YMax(ext) as ymax FROM (SELECT ST_Extent(geometry) as ext FROM "${table}") as t`);
             res.json(result.rows[0]);
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
     router.delete('/data/:table/:gid', authenticateToken, async (req, res) => {
-        const table = req.params.table.toLowerCase();
         const { gid } = req.params;
         try {
+            const table = await resolveSafeTableName(req.params.table);
             await pool.query(`DELETE FROM "${table}" WHERE gid=$1`, [gid]);
             res.json({ status: 'ok' });
         } catch (e) { res.status(500).json({ error: e.message }); }

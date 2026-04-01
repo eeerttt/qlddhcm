@@ -43,6 +43,14 @@ export interface SpatialTable {
     description?: string;
 }
 
+export interface ParcelListResponse {
+    data: ParcelDTO[];
+    total: number;
+    page: number;
+    limit: number;
+    pages: number;
+}
+
 const getAuthHeaders = () => {
     const headers: any = { 'Content-Type': 'application/json' };
     const userStr = localStorage.getItem('geo_user');
@@ -88,7 +96,7 @@ const handleResponse = async (res: Response) => {
 };
 
 export const parcelApi = {
-    getAll: async (layer: string, filters?: { sodoto?: string, sothua?: string, tenchu?: string, diachi?: string }) => {
+    getAll: async (layer: string, filters?: { sodoto?: string, sothua?: string, tenchu?: string, diachi?: string }, pagination?: { page?: number; limit?: number }): Promise<ParcelListResponse> => {
         let queryString = `?t=${Date.now()}`;
         if (filters) {
             if (filters.sodoto) queryString += `&sodoto=${encodeURIComponent(filters.sodoto)}`;
@@ -96,8 +104,20 @@ export const parcelApi = {
             if (filters.tenchu) queryString += `&tenchu=${encodeURIComponent(filters.tenchu)}`;
             if (filters.diachi) queryString += `&diachi=${encodeURIComponent(filters.diachi)}`;
         }
+        if (pagination?.page) queryString += `&page=${pagination.page}`;
+        if (pagination?.limit) queryString += `&limit=${pagination.limit}`;
         const res = await fetch(`${API_URL}/api/data/${layer}${queryString}`, { headers: { ...getAuthHeaders() } });
-        return await handleResponse(res);
+        const response = await handleResponse(res);
+        if (Array.isArray(response)) {
+            return { data: response, total: response.length, page: 1, limit: response.length || 100, pages: 1 };
+        }
+        return {
+            data: Array.isArray(response?.data) ? response.data : [],
+            total: Number(response?.total || 0),
+            page: Number(response?.page || 1),
+            limit: Number(response?.limit || 100),
+            pages: Number(response?.pages || 1)
+        };
     },
 
     getExtent: async (layer: string) => {

@@ -73,6 +73,10 @@ const initDB = async () => {
         await pool.query(`ALTER TABLE wms_layers ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'WMS'`);
         await pool.query(`ALTER TABLE wms_layers ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'STANDARD'`);
         await pool.query(`ALTER TABLE wms_layers ADD COLUMN IF NOT EXISTS opacity NUMERIC DEFAULT 1`);
+        await pool.query(`ALTER TABLE wms_layers ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''`);
+        await pool.query(`ALTER TABLE wms_layers ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0`);
+        await pool.query(`ALTER TABLE basemaps ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0`);
+        await pool.query(`ALTER TABLE basemaps ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''`);
 
         // Đảm bảo bảng tin nhắn có cột is_deleted và deleted_at
         await pool.query(`
