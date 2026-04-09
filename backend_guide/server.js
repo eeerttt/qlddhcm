@@ -5,6 +5,8 @@ import pg from 'pg';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import dotenv from 'dotenv';
+dotenv.config({ path: fileURLToPath(new URL('.env', import.meta.url)) });
 import dbConfig from './db_config.js';
 
 // Import New Routers
@@ -77,6 +79,12 @@ const initDB = async () => {
         await pool.query(`ALTER TABLE wms_layers ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0`);
         await pool.query(`ALTER TABLE basemaps ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0`);
         await pool.query(`ALTER TABLE basemaps ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''`);
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS role_permissions (
+                role TEXT PRIMARY KEY,
+                permissions TEXT[] DEFAULT ARRAY[]::TEXT[]
+            )
+        `);
 
         // Đảm bảo bảng tin nhắn có cột is_deleted và deleted_at
         await pool.query(`

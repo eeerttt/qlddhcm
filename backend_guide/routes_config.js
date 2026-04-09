@@ -1,9 +1,33 @@
 
 import express from 'express';
+import nodemailer from 'nodemailer';
 import { authenticateToken, requireAdmin } from './middleware_auth.js';
 
 export default function(pool, logSystemAction) {
     const router = express.Router();
+
+    const getEffectiveMailSettings = async (overrides = {}) => {
+        const res = await pool.query(`
+            SELECT key, value FROM system_settings
+            WHERE key IN ('mail_host', 'mail_port', 'mail_user', 'mail_pass', 'mail_from_name', 'mail_from_email', 'system_name')
+        `);
+
+        const dbSettings = {};
+        res.rows.forEach(r => dbSettings[r.key] = r.value);
+
+        const merged = {
+            mail_host: dbSettings.mail_host || process.env.MAIL_HOST || '',
+            mail_port: dbSettings.mail_port || process.env.MAIL_PORT || '587',
+            mail_user: dbSettings.mail_user || process.env.MAIL_USER || '',
+            mail_pass: dbSettings.mail_pass || process.env.MAIL_PASS || '',
+            mail_from_name: dbSettings.mail_from_name || process.env.MAIL_FROM_NAME || 'GeoMaster System',
+            mail_from_email: dbSettings.mail_from_email || process.env.MAIL_FROM_EMAIL || dbSettings.mail_user || process.env.MAIL_USER || '',
+            system_name: dbSettings.system_name || 'GeoMaster',
+            ...overrides
+        };
+
+        return merged;
+    };
 
     // --- BRANCHES ---
     router.get('/branches', async (req, res) => {
@@ -201,6 +225,50 @@ export default function(pool, logSystemAction) {
             }
             res.json({ status: 'ok' });
         } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    // --- TEST SMTP MAIL ---
+    router.post('/settings/test-mail', authenticateToken, requireAdmin, async (req, res) => {
+        try {
+            const body = req.body || {};
+            const smtp = body.smtp || {};
+            const settings = await getEffectiveMailSettings(smtp);
+
+            if (!settings.mail_host || !settings.mail_user || !settings.mail_pass) {
+                return res.status(400).json({ error: 'Thiếu cấu hình SMTP: host/user/pass.' });
+            }
+
+            const to = (body.to || settings.mail_user || '').trim();
+            if (!to) return res.status(400).json({ error: 'Thiếu email nhận thử.' });
+
+            const transporter = nodemailer.createTransport({
+                host: settings.mail_host,
+                port: parseInt(settings.mail_port) || 587,
+                secure: parseInt(settings.mail_port) === 465,
+                auth: {
+                    user: settings.mail_user,
+                    pass: settings.mail_pass
+                }
+            });
+
+            await transporter.verify();
+
+            const now = new Date().toLocaleString('vi-VN');
+            const fromEmail = settings.mail_from_email || settings.mail_user;
+            const from = `"${settings.mail_from_name || settings.system_name || 'GeoMaster System'}" <${fromEmail}>`;
+            await transporter.sendMail({
+                from,
+                to,
+                subject: `[${settings.system_name || 'GeoMaster'}] Test SMTP thành công`,
+                text: `Đây là email test SMTP từ hệ thống ${settings.system_name || 'GeoMaster'} vào lúc ${now}.\nHost: ${settings.mail_host}\nPort: ${settings.mail_port}`,
+                html: `<div style="font-family:Segoe UI,Arial,sans-serif;line-height:1.6"><h3>Test SMTP thành công</h3><p>Hệ thống <strong>${settings.system_name || 'GeoMaster'}</strong> đã gửi email test thành công vào lúc <strong>${now}</strong>.</p><p><strong>Host:</strong> ${settings.mail_host}<br/><strong>Port:</strong> ${settings.mail_port}</p></div>`
+            });
+
+            await logSystemAction(req, 'TEST_SMTP_MAIL', `Gửi mail test tới ${to} (${settings.mail_host}:${settings.mail_port})`);
+            res.json({ status: 'ok', message: `Đã gửi email test tới ${to}.` });
+        } catch (e) {
+            res.status(500).json({ error: `Test SMTP thất bại: ${e.message}` });
+        }
     });
 
     return router;

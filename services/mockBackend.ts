@@ -27,16 +27,14 @@ const getApiUrl = () => {
         return origin; 
     }
 
-    // Kiểm tra môi trường Dev/Local (localhost, IP nội bộ)
-    const isLocal = hostname === 'localhost' || 
+    // Chỉ coi localhost là môi trường dev nội bộ.
+    // Tránh tự fallback về IP LAN (10.x/192.168.x/172.x) khi deploy nội bộ.
+    const isLocalhost = hostname === 'localhost' || 
                    hostname === '127.0.0.1' || 
-                   hostname === '0.0.0.0' ||
-                   hostname.startsWith('192.168.') || 
-                   hostname.startsWith('10.') || 
-                   hostname.startsWith('172.');
+                   hostname === '0.0.0.0';
     
-    if (isLocal) {
-        return origin; // Trong môi trường dev tích hợp, dùng luôn origin
+    if (isLocalhost && import.meta.env.DEV) {
+        return origin;
     }
 
     // Mọi môi trường deploy còn lại mặc định gọi backend riêng.
@@ -190,6 +188,8 @@ export const adminService = {
         return Array.isArray(data) ? data : [];
     },
     saveSettings: async (settings: SystemSetting[]) => apiCall('/settings', { method: 'POST', body: JSON.stringify({ settings }) }),
+    testMail: async (payload: { to?: string; smtp?: Record<string, string> }) =>
+        apiCall('/settings/test-mail', { method: 'POST', body: JSON.stringify(payload) }),
     getWmsLayers: async () => {
         const data = await apiCall('/wms-layers');
         return Array.isArray(data) ? data : [];

@@ -5,6 +5,25 @@ import { authenticateToken } from './middleware_auth.js';
 
 export default function(pool, logSystemAction, dbConfig) {
     const router = express.Router();
+    const VALID_ROLES = new Set(['ADMIN', 'EDITOR', 'VIEWER']);
+
+    const normalizePermissions = (value) => {
+        if (Array.isArray(value)) {
+            return Array.from(new Set(value.map(v => String(v).trim()).filter(Boolean)));
+        }
+        if (typeof value === 'string') {
+            const raw = value.trim();
+            if (!raw) return [];
+            try {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                    return Array.from(new Set(parsed.map(v => String(v).trim()).filter(Boolean)));
+                }
+            } catch (_) {}
+            return Array.from(new Set(raw.split(',').map(v => v.trim()).filter(Boolean)));
+        }
+        return [];
+    };
 
     // --- WMS LAYERS ---
     router.get('/wms-layers', async (req, res) => {
@@ -132,11 +151,57 @@ export default function(pool, logSystemAction, dbConfig) {
 
     // --- ROLE PERMISSIONS ---
     router.get('/role-permissions', authenticateToken, async (req, res) => {
-        try { res.json((await pool.query(`SELECT role, permissions FROM role_permissions`)).rows); } catch (e) { res.status(500).json({ error: e.message }); }
+        try {
+            const result = await pool.query(`SELECT role, permissions FROM role_permissions`);
+            const rows = result.rows.map(row => ({
+                role: String(row.role || '').toUpperCase(),
+                permissions: normalizePermissions(row.permissions)
+            })).filter(row => VALID_ROLES.has(row.role));
+            res.json(rows);
+        } catch (e) { res.status(500).json({ error: e.message }); }
     });
     router.post('/role-permissions', authenticateToken, async (req, res) => {
+        const role = String(req.body?.role || '').toUpperCase();
+        const permissions = normalizePermissions(req.body?.permissions);
+
+        if (!VALID_ROLES.has(role)) {
+            return res.status(400).json({ error: 'Vai trò không hợp lệ.' });
+        }
+
         try {
-            await pool.query(`INSERT INTO role_permissions (role, permissions) VALUES ($1, $2) ON CONFLICT (role) DO UPDATE SET permissions = EXCLUDED.permissions`, [req.body.role, req.body.permissions]);
+            const colResult = await pool.query(
+                `SELECT data_type, udt_name FROM information_schema.columns WHERE table_name = 'role_permissions' AND column_name = 'permissions' LIMIT 1`
+            );
+            const columnInfo = colResult.rows[0];
+            if (!columnInfo) {
+                return res.status(500).json({ error: 'Không tìm thấy cột permissions trong bảng role_permissions.' });
+            }
+
+            await pool.query(`DELETE FROM role_permissions WHERE role = $1`, [role]);
+
+            if (columnInfo.data_type === 'ARRAY' || columnInfo.udt_name === '_text') {
+                await pool.query(
+                    `INSERT INTO role_permissions (role, permissions) VALUES ($1, $2::text[])`,
+                    [role, permissions]
+                );
+            } else if (columnInfo.data_type === 'jsonb') {
+                await pool.query(
+                    `INSERT INTO role_permissions (role, permissions) VALUES ($1, $2::jsonb)`,
+                    [role, JSON.stringify(permissions)]
+                );
+            } else if (columnInfo.data_type === 'json') {
+                await pool.query(
+                    `INSERT INTO role_permissions (role, permissions) VALUES ($1, $2::json)`,
+                    [role, JSON.stringify(permissions)]
+                );
+            } else {
+                await pool.query(
+                    `INSERT INTO role_permissions (role, permissions) VALUES ($1, $2)`,
+                    [role, JSON.stringify(permissions)]
+                );
+            }
+
+            await logSystemAction(req, 'UPDATE_ROLE_PERMISSIONS', `Cập nhật phân quyền cho vai trò: ${role}`);
             res.json({ status: 'ok' });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });

@@ -6,9 +6,10 @@ const router = express.Router();
 const ALLOWED_PROXY_DOMAINS = [
     'vietbando.com',
     'images.vietbando.com',
-    'gisvn.space',
-    'apigeo.gisvn.space',
-    'api.datdathcm.pro',
+    'localhost',
+    '10.12.32.11',
+    'api.datdaihcm.pro',
+    'datdaihcm.pro',
     'openstreetmap.org',
     'tile.openstreetmap.org',
     'google.com',

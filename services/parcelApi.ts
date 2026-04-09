@@ -11,17 +11,11 @@ const getApiUrl = () => {
         return configuredApiUrl.replace(/\/$/, '');
     }
     
-    // Dùng origin (cùng host:port với trình duyệt) để đi qua Vite proxy
-    // Vite proxy sẽ chuyển tiếp /api → backend port 3004
-    // Tránh gọi trực tiếp port 3004 vì máy khác trong LAN có thể bị chặn firewall
-    const isLocal = hostname === 'localhost' || 
+    const isLocalhost = hostname === 'localhost' || 
         hostname === '127.0.0.1' || 
-        hostname === '0.0.0.0' ||
-        hostname.startsWith('192.168.') || 
-        hostname.startsWith('10.') || 
-        hostname.startsWith('172.');
+        hostname === '0.0.0.0';
 
-    if (isLocal || hostname.includes('.run.app') || hostname.includes('aistudio.google.com')) {
+    if ((isLocalhost && import.meta.env.DEV) || hostname.includes('.run.app') || hostname.includes('aistudio.google.com')) {
         return origin;
     }
 

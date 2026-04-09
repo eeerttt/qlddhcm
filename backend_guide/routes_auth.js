@@ -15,17 +15,29 @@ const createDynamicTransporter = async (pool) => {
     try {
         const res = await pool.query(`
             SELECT key, value FROM system_settings 
-            WHERE key IN ('mail_host', 'mail_port', 'mail_user', 'mail_pass', 'mail_from_name', 'system_name')
+            WHERE key IN ('mail_host', 'mail_port', 'mail_user', 'mail_pass', 'mail_from_name', 'mail_from_email', 'system_name')
         `);
         
         const settings = {};
         res.rows.forEach(r => settings[r.key] = r.value);
 
-        // Nếu chưa cấu hình, trả về null hoặc báo lỗi
+        // Fallback sang biến môi trường nếu DB chưa cấu hình
         if (!settings.mail_host || !settings.mail_user || !settings.mail_pass) {
-            console.warn("⚠️ Mail Server chưa được cấu hình đầy đủ trong System Settings.");
-            return null;
+            if (process.env.MAIL_HOST && process.env.MAIL_USER && process.env.MAIL_PASS) {
+                console.log("📧 Dùng cấu hình SMTP từ biến môi trường (.env)");
+                settings.mail_host      = process.env.MAIL_HOST;
+                settings.mail_port      = process.env.MAIL_PORT || '587';
+                settings.mail_user      = process.env.MAIL_USER;
+                settings.mail_pass      = process.env.MAIL_PASS;
+                settings.mail_from_name = process.env.MAIL_FROM_NAME || settings.mail_from_name;
+                settings.mail_from_email = process.env.MAIL_FROM_EMAIL || settings.mail_from_email;
+            } else {
+                console.warn("⚠️ Mail Server chưa được cấu hình đầy đủ trong System Settings.");
+                return null;
+            }
         }
+
+        settings.mail_from_email = settings.mail_from_email || process.env.MAIL_FROM_EMAIL || settings.mail_user;
 
         const transporter = nodemailer.createTransport({
             host: settings.mail_host,
@@ -42,7 +54,7 @@ const createDynamicTransporter = async (pool) => {
         
         return { 
             transporter, 
-            from: `"${settings.mail_from_name || settings.system_name || 'GeoMaster System'}" <${settings.mail_user}>`,
+            from: `"${settings.mail_from_name || settings.system_name || 'GeoMaster System'}" <${settings.mail_from_email}>`,
             systemName: settings.system_name || 'GeoMaster'
         };
     } catch (error) {

@@ -14,10 +14,11 @@ const SETTING_METADATA: Record<string, { label: string; description: string; typ
     'seo_description': { label: 'Mô tả Meta SEO', description: 'Mô tả ngắn gọn để Google tìm kiếm và hiển thị', type: 'text' },
     'seo_keywords': { label: 'Từ khóa SEO', description: 'Các từ khóa cách nhau bởi dấu phẩy', type: 'text' },
     'seo_og_image': { label: 'Ảnh chia sẻ MXH', description: 'Ảnh hiển thị khi gửi link qua Zalo, Facebook', type: 'image' },
-    'mail_host': { label: 'SMTP Server Host', description: 'Địa chỉ máy chủ (VD: smtp.gmail.com)', type: 'text' },
-    'mail_port': { label: 'SMTP Port', description: 'Cổng gửi thư (VD: 465 hoặc 587)', type: 'number' },
+    'mail_host': { label: 'SMTP Host', description: 'Địa chỉ máy chủ SMTP (Brevo: smtp-relay.brevo.com)', type: 'text' },
+    'mail_port': { label: 'SMTP Port', description: 'Cổng gửi thư (Brevo: 587, SSL thường dùng: 465)', type: 'number' },
     'mail_user': { label: 'Tài khoản Email', description: 'Email dùng để gửi thư hệ thống', type: 'text' },
     'mail_pass': { label: 'Mật khẩu ứng dụng', description: 'Mật khẩu ứng dụng (App Password) của Gmail/Outlook', type: 'text' },
+    'mail_from_email': { label: 'Email người gửi (From)', description: 'Email hiển thị ở địa chỉ người gửi (VD: hotro@qlddhcm.io.vn)', type: 'text' },
     'mail_from_name': { label: 'Tên người gửi', description: 'Tên hiển thị khi khách nhận được email', type: 'text' },
     'footer_text': { label: 'Thông tin chân trang', description: 'Thông tin bản quyền và liên hệ cuối trang', type: 'text' },
     'map_center_lat': { label: 'Vĩ độ trung tâm (Lat)', description: 'Vĩ độ mặc định khi tải bản đồ', type: 'number' },
@@ -35,13 +36,13 @@ const TAB_KEYS: Record<string, string[]> = {
     MAP:     ['map_center_lat', 'map_center_lng', 'default_zoom', 'map_max_zoom', 'map_min_zoom'],
     PDF:     ['pdf_header_text', 'pdf_footer_text'],
     SEO:     ['seo_title', 'seo_description', 'seo_keywords', 'seo_og_image'],
-    MAIL:    ['mail_host', 'mail_port', 'mail_user', 'mail_pass', 'mail_from_name'],
+    MAIL:    ['mail_host', 'mail_port', 'mail_user', 'mail_pass', 'mail_from_email', 'mail_from_name'],
 };
 
 // ─── Inline validation ────────────────────────────────────────────────────────
 const validate = (key: string, value: string): string => {
     if (!value) return '';
-    if (key === 'mail_user' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Email không hợp lệ';
+    if ((key === 'mail_user' || key === 'mail_from_email') && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Email không hợp lệ';
     if (key === 'mail_port') { const n = parseInt(value); if (isNaN(n) || n < 1 || n > 65535) return 'Port phải từ 1 → 65535'; }
     if (key === 'map_center_lat') { const n = parseFloat(value); if (isNaN(n) || n < -90 || n > 90) return 'Vĩ độ phải từ -90 → 90'; }
     if (key === 'map_center_lng') { const n = parseFloat(value); if (isNaN(n) || n < -180 || n > 180) return 'Kinh độ phải từ -180 → 180'; }
@@ -68,6 +69,11 @@ const SystemSettingsManager: React.FC = () => {
     // DB connection test
     const [dbTestStatus, setDbTestStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
     const [dbTestMsg, setDbTestMsg] = useState('');
+
+    // SMTP test
+    const [mailTestTo, setMailTestTo] = useState('');
+    const [mailTestStatus, setMailTestStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
+    const [mailTestMsg, setMailTestMsg] = useState('');
 
     // Backup
     const [backupTables, setBackupTables] = useState<{system: string[], spatial: string[]}>({ system: [], spatial: [] });
@@ -129,10 +135,36 @@ const SystemSettingsManager: React.FC = () => {
             const data: SystemSetting[] = await adminService.getSettings();
             setSettings(data);
             setSavedSettings(data.map(s => ({ ...s }))); // pristine copy
+            if (!mailTestTo) {
+                const mailUser = data.find(s => s.key === 'mail_user')?.value || '';
+                setMailTestTo(mailUser);
+            }
         } catch (e) {
             console.error(e);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleTestMail = async () => {
+        setMailTestStatus('testing');
+        setMailTestMsg('Đang kiểm tra SMTP và gửi email test...');
+        try {
+            const smtp = {
+                mail_host: settings.find(s => s.key === 'mail_host')?.value || '',
+                mail_port: settings.find(s => s.key === 'mail_port')?.value || '',
+                mail_user: settings.find(s => s.key === 'mail_user')?.value || '',
+                mail_pass: settings.find(s => s.key === 'mail_pass')?.value || '',
+                mail_from_email: settings.find(s => s.key === 'mail_from_email')?.value || '',
+                mail_from_name: settings.find(s => s.key === 'mail_from_name')?.value || '',
+                system_name: settings.find(s => s.key === 'system_name')?.value || 'GeoMaster'
+            };
+            const result = await adminService.testMail({ to: mailTestTo, smtp });
+            setMailTestStatus('ok');
+            setMailTestMsg(result?.message || 'Đã gửi email test thành công.');
+        } catch (e: any) {
+            setMailTestStatus('error');
+            setMailTestMsg(e.message || 'Test SMTP thất bại.');
         }
     };
 
@@ -579,9 +611,41 @@ const SystemSettingsManager: React.FC = () => {
                     <div className="space-y-6 animate-in fade-in duration-300">
                         <div className="p-4 bg-rose-900/10 border border-rose-800/30 rounded flex gap-3 items-center mb-4">
                             <Mail className="text-rose-400" size={24}/>
-                            <p className="text-xs text-rose-300 italic">Cấu hình máy chủ gửi thư SMTP (Gmail, Outlook, Private Mail...) để gửi mã OTP.</p>
+                            <p className="text-xs text-rose-300 italic">Cấu hình máy chủ gửi thư SMTP để gửi mã OTP. Với Brevo, dùng host smtp-relay.brevo.com và port 587.</p>
                         </div>
-                        {['mail_host', 'mail_port', 'mail_user', 'mail_pass', 'mail_from_name'].map(key => (
+                        <div className="p-4 bg-gray-900/60 border border-gray-700 rounded-lg space-y-3">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                                <div className="md:col-span-2 space-y-1">
+                                    <label className="text-sm font-bold text-gray-200 block">Email nhận thử</label>
+                                    <input
+                                        className="w-full bg-gray-900 border border-gray-600 rounded p-2.5 text-white outline-none focus:border-rose-500"
+                                        value={mailTestTo}
+                                        onChange={e => setMailTestTo(e.target.value)}
+                                        placeholder="vd: admin@company.com"
+                                        type="email"
+                                    />
+                                </div>
+                                <button
+                                    onClick={handleTestMail}
+                                    disabled={mailTestStatus === 'testing' || !mailTestTo}
+                                    className="h-[42px] px-4 rounded bg-rose-700 hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-bold text-white transition-colors flex items-center justify-center gap-2"
+                                >
+                                    {mailTestStatus === 'testing' ? <RefreshCw size={14} className="animate-spin" /> : <Mail size={14} />}
+                                    Test gửi thư
+                                </button>
+                            </div>
+                            {mailTestStatus !== 'idle' && (
+                                <div className={`text-xs px-3 py-2 rounded border ${
+                                    mailTestStatus === 'ok' ? 'bg-emerald-900/20 border-emerald-700 text-emerald-300' :
+                                    mailTestStatus === 'error' ? 'bg-red-900/20 border-red-700 text-red-300' :
+                                    'bg-blue-900/20 border-blue-700 text-blue-300'
+                                }`}>
+                                    {mailTestMsg}
+                                </div>
+                            )}
+                            <p className="text-[11px] text-gray-500">Nút này dùng ngay giá trị SMTP hiện tại trên form (kể cả chưa bấm Lưu).</p>
+                        </div>
+                        {['mail_host', 'mail_port', 'mail_user', 'mail_pass', 'mail_from_email', 'mail_from_name'].map(key => (
                             <div key={key} className="grid grid-cols-1 md:grid-cols-3 gap-4 border-b border-gray-700/50 pb-6 last:border-0 last:pb-0">
                                 <div className="col-span-1">
                                     <label className="text-sm font-bold text-gray-200 block mb-1">{SETTING_METADATA[key]?.label || key}</label>
