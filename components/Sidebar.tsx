@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { User, UserRole, MenuItem, SystemNotification } from '../types';
-import { LogOut, LogIn, ChevronLeft, ChevronRight, User as UserIcon, Database, HelpCircle, ExternalLink, Bell, X, Info, AlertTriangle, Clock, Menu } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { User, MenuItem } from '../types';
+import { LogOut, LogIn, ChevronLeft, ChevronRight, User as UserIcon, Database, HelpCircle, ExternalLink, Bell, X, Menu } from 'lucide-react';
 import * as Icons from 'lucide-react';
 import { adminService, notificationService, API_URL } from '../services/mockBackend';
 
@@ -32,11 +32,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [loading, setLoading] = useState(true);
   const [imgError, setImgError] = useState(false);
   
-  // Notification States
-  const [notifications, setNotifications] = useState<SystemNotification[]>([]);
-  const [isNotiOpen, setIsNotiOpen] = useState(false);
+  // Notification badge state
   const [unreadCount, setUnreadCount] = useState(0);
-  const notiRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
       setImgError(false);
@@ -58,41 +55,41 @@ const Sidebar: React.FC<SidebarProps> = ({
       fetchMenu();
   }, [user?.role]);
 
-  // Fetch Notifications
   useEffect(() => {
-      if (user) {
-          const fetchNoti = async () => {
-              try {
-                  const data = await notificationService.getNotifications();
-                  setNotifications(data);
-                  const lastRead = localStorage.getItem(`last_read_noti_${user.id}`) || '0';
-                  const count = data.filter(n => new Date(n.created_at).getTime() > parseInt(lastRead)).length;
-                  setUnreadCount(count);
-              } catch (e) {}
-          };
-          fetchNoti();
-          const interval = setInterval(fetchNoti, 60000);
-          return () => clearInterval(interval);
+      if (!user) {
+          setUnreadCount(0);
+          return;
       }
+
+      const fetchUnreadCount = async () => {
+          try {
+              const data = await notificationService.getNotifications();
+              const lastRead = localStorage.getItem(`last_read_noti_${user.id}`) || '0';
+              const count = data.filter(n => new Date(n.created_at).getTime() > parseInt(lastRead, 10)).length;
+              setUnreadCount(count);
+          } catch {
+              setUnreadCount(0);
+          }
+      };
+
+      fetchUnreadCount();
+      const interval = setInterval(fetchUnreadCount, 60000);
+      return () => clearInterval(interval);
   }, [user]);
 
-  useEffect(() => {
-      const handleOutside = (e: MouseEvent) => {
-          if (notiRef.current && !notiRef.current.contains(e.target as Node)) setIsNotiOpen(false);
-      };
-      document.addEventListener('mousedown', handleOutside);
-      return () => document.removeEventListener('mousedown', handleOutside);
-  }, []);
-
-  const handleOpenNoti = () => {
-      setIsNotiOpen(!isNotiOpen);
-      if (!isNotiOpen && user) {
-          setUnreadCount(0);
+  const handleOpenNotificationsPage = () => {
+      onNavigate('notifications');
+      if (user) {
           localStorage.setItem(`last_read_noti_${user.id}`, Date.now().toString());
+      }
+      setUnreadCount(0);
+      if (window.innerWidth < 768 && !isCollapsed) {
+          onCollapse();
       }
   };
 
   const visibleItems = dynamicMenu.filter(item => {
+    if (!user && item.id === 'notifications') return false;
     if (!user) return item.roles.includes('GUEST');
     return item.roles.includes(user.role);
   });
@@ -100,6 +97,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   const handleMenuClick = (item: MenuItem) => {
       if (item.type === 'EXTERNAL' && item.url) {
           window.open(item.url, '_blank');
+      } else if (item.id === 'notifications') {
+          handleOpenNotificationsPage();
       } else {
         const internalPath = item.url?.startsWith('/') ? item.url : undefined;
         onNavigate(item.id, internalPath);
@@ -188,60 +187,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                           </div>
                       </div>
                   )}
+                </div>
+                </div>
               </div>
-
-              {user && !isCollapsed && (
-                  <div className="relative" ref={notiRef}>
-                      <button 
-                          onClick={handleOpenNoti}
-                          className={`p-2 rounded-xl transition-all ${isNotiOpen ? 'bg-blue-600 text-white' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800'}`}
-                      >
-                          <Bell size={18} />
-                          {unreadCount > 0 && (
-                              <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-600 text-white text-[8px] font-black rounded-full flex items-center justify-center border-2 border-[#0f172a] animate-bounce">
-                                  {unreadCount}
-                              </span>
-                          )}
-                      </button>
-
-                      {isNotiOpen && (
-                          <div className="absolute left-10 md:left-auto md:right-0 top-12 w-80 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 z-[100]">
-                              <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950/50">
-                                  <h4 className="text-[10px] font-black uppercase tracking-widest text-white">Trung tâm Thông báo</h4>
-                                  <button onClick={() => setIsNotiOpen(false)} className="text-slate-500 hover:text-white"><X size={14}/></button>
-                              </div>
-                              <div className="max-h-96 overflow-y-auto custom-scrollbar">
-                                  {notifications.length === 0 ? (
-                                      <div className="p-10 text-center text-slate-600 italic text-xs">Không có thông báo mới</div>
-                                  ) : notifications.map(n => (
-                                      <div key={n.id} className="p-4 border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
-                                          <div className="flex gap-3">
-                                              <div className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center ${
-                                                  n.type === 'DANGER' ? 'bg-red-900/30 text-red-500' :
-                                                  n.type === 'WARNING' ? 'bg-orange-900/30 text-orange-500' :
-                                                  'bg-blue-900/30 text-blue-500'
-                                              }`}>
-                                                  {n.type === 'DANGER' ? <AlertTriangle size={14}/> : <Info size={14}/>}
-                                              </div>
-                                              <div className="flex-1 overflow-hidden">
-                                                  <p className="text-xs font-black text-slate-200 mb-1">{n.title}</p>
-                                                  <p className="text-[10px] text-slate-500 leading-relaxed mb-2">{n.content}</p>
-                                                  <div className="flex items-center gap-2 text-[8px] font-bold text-slate-600 uppercase">
-                                                      <Clock size={8}/> {new Date(n.created_at).toLocaleDateString()}
-                                                      <span>•</span>
-                                                      <span>Admin: {n.sender_name}</span>
-                                                  </div>
-                                              </div>
-                                          </div>
-                                      </div>
-                                  ))}
-                              </div>
-                          </div>
-                      )}
-                  </div>
-              )}
-          </div>
-        </div>
 
         <div className="flex-1 py-6 space-y-1.5 overflow-y-auto custom-scrollbar no-scrollbar px-3">
           {loading ? (
@@ -250,6 +198,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               </div>
           ) : visibleItems.map(item => {
             const isActive = activePage === item.id;
+            const isNotiItem = item.id === 'notifications';
             let IconComponent = (Icons as any)[item.icon] || HelpCircle;
 
             return (
@@ -263,14 +212,24 @@ const Sidebar: React.FC<SidebarProps> = ({
                     : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
                 }`}
               >
-                <div className={`${isCollapsed ? 'mx-auto' : ''} transition-transform group-hover:scale-110 flex items-center z-10`}>
+                <div className={`${isCollapsed ? 'mx-auto' : ''} transition-transform group-hover:scale-110 flex items-center z-10 relative`}>
                   <IconComponent size={20} className={isActive ? 'text-white' : 'text-slate-400 group-hover:text-blue-400'} />
+                  {isNotiItem && unreadCount > 0 && (
+                      <div className="absolute -top-1 -right-1 min-w-4 h-4 px-1 bg-red-600 text-white text-[9px] font-black rounded-full flex items-center justify-center border border-slate-800 animate-pulse">
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                      </div>
+                  )}
                 </div>
                 
                 {!isCollapsed && (
                   <div className="flex-1 flex items-center justify-between animate-in fade-in slide-in-from-left-2 duration-300 z-10">
                       <span className={`font-bold text-xs uppercase tracking-wide ${isActive ? 'text-white' : ''}`}>
-                      {item.label}
+                        {item.label}
+                        {isNotiItem && unreadCount > 0 && !isCollapsed && (
+                            <span className="ml-2 inline-flex items-center justify-center min-w-4 h-4 px-1 bg-red-600 text-white text-[9px] font-black rounded-full">
+                                {unreadCount > 99 ? '99+' : unreadCount}
+                            </span>
+                        )}
                       </span>
                       {item.type === 'EXTERNAL' && (
                           <ExternalLink size={12} className="text-slate-500 group-hover:text-white transition-colors" />
@@ -280,17 +239,12 @@ const Sidebar: React.FC<SidebarProps> = ({
               </button>
             );
           })}
+
         </div>
 
         <div className="p-4 border-t border-slate-800/80 bg-slate-900/50 backdrop-blur-sm">
           {user ? (
             <div className="flex flex-col gap-3">
-              {isCollapsed && (
-                  <button onClick={handleOpenNoti} className="w-10 h-10 mx-auto rounded-full bg-slate-800 flex items-center justify-center text-slate-400 hover:text-blue-400 transition-colors relative mb-2">
-                      <Bell size={18}/>
-                      {unreadCount > 0 && <span className="absolute top-0 right-0 w-3 h-3 bg-red-600 rounded-full border-2 border-[#0f172a]"></span>}
-                  </button>
-              )}
 
               {!isCollapsed ? (
                 <div 

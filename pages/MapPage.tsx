@@ -251,8 +251,8 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
             <div ref={mapElement} className="flex-1 w-full relative" />
             <MeasureTools activeMode={measureMode} onModeChange={setMeasureMode} onClear={() => measureSource.current.clear()} />
             
-            <div ref={popupElement} className="absolute bottom-0 left-0 pointer-events-none">
-                {selectedParcel && (
+            {selectedParcel && (
+                <div className="fixed inset-0 flex items-center justify-center pointer-events-none z-[50]">
                     <div className="pointer-events-auto">
                         <ParcelPopup 
                             parcel={selectedParcel} 
@@ -262,8 +262,8 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
                             onEdit={handleOpenEdit} 
                         />
                     </div>
-                )}
-            </div>
+                </div>
+            )}
 
             <div className="fixed -left-[4000px] top-0 opacity-0 pointer-events-none overflow-hidden">
                 {printingParcel && <PrintTemplate parcel={printingParcel} user={user} systemSettings={systemSettings} />}

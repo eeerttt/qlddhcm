@@ -7,7 +7,7 @@ import './index.css';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
-  throw new Error("Could not find root element to mount to");
+  throw new Error("Không tìm thấy phần tử gốc để gắn kết. Vui lòng đảm bảo rằng có một phần tử");
 }
 
 const root = ReactDOM.createRoot(rootElement);

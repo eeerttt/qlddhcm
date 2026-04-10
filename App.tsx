@@ -13,6 +13,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const AdminPage = lazy(() => import('./pages/AdminPage'));
 const UserProfile = lazy(() => import('./pages/UserProfile'));
 const Messaging = lazy(() => import('./pages/Messaging'));
+const Notifications = lazy(() => import('./pages/Notifications.tsx'));
 const QRGenerator = lazy(() => import('./components/tools/QRGenerator'));
 const EditorPage = lazy(() => import('./pages/EditorPage'));
 const LandPriceLookup = lazy(() => import('./pages/LandPriceLookup'));
@@ -40,6 +41,7 @@ const PATH_MAPPING: Record<string, string> = {
     'editor': '/chinhsuabanve',
     'profile': '/hoso',
     'messaging': '/tinnhan',
+    'notifications': '/thongbao',
     'qr-generator': '/taomaqr',
     'land-price': '/giadata',
     'admin': '/quantri',
@@ -220,7 +222,7 @@ const App: React.FC = () => {
   );
 
   // Render 404 toàn màn hình — trước khi vào layout sidebar
-  const KNOWN_PATHS = ['/', '/giadata', '/taomaqr', '/gioithieu', '/thongke', '/chinhsuabanve', '/hoso', '/tinnhan', '/quantri'];
+  const KNOWN_PATHS = ['/', '/giadata', '/taomaqr', '/gioithieu', '/thongke', '/chinhsuabanve', '/hoso', '/tinnhan', '/thongbao', '/quantri'];
   const isKnownPath = KNOWN_PATHS.some(p => location.pathname === p || location.pathname.startsWith(p + '/'));
   if (!isKnownPath) return (
       <Suspense fallback={<PageLoader />}>
@@ -265,6 +267,7 @@ const App: React.FC = () => {
                 <Route path="/chinhsuabanve" element={<ProtectedRoute><EditorPage user={user!} /></ProtectedRoute>} />
                 <Route path="/hoso" element={<ProtectedRoute><UserProfile user={user!} onUpdateUser={u => { setUser(u); localStorage.setItem('geo_user', JSON.stringify(u)); }} /></ProtectedRoute>} />
                 <Route path="/tinnhan" element={<ProtectedRoute><Messaging user={user!} /></ProtectedRoute>} />
+                <Route path="/thongbao" element={<ProtectedRoute><Notifications user={user!} /></ProtectedRoute>} />
                 
                 {/* Admin Route */}
                 <Route path="/quantri" element={
