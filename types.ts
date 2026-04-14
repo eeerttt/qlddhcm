@@ -135,7 +135,7 @@ export interface WMSLayerConfig {
     visible: boolean;
     opacity?: number;
     type?: 'WMS' | 'XYZ'; 
-    category?: 'STANDARD' | 'PLANNING';
+    category?: 'STANDARD' | 'PLANNING' | 'ADMINISTRATIVE';
   description?: string;
   sortOrder?: number;
 }

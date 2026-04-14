@@ -43,6 +43,13 @@ export interface SpatialTable {
     description?: string;
 }
 
+export interface AdminSearchResult {
+    gid: number;
+    name: string;
+    properties: Record<string, any>;
+    geometry: any;
+}
+
 export interface ParcelListResponse {
     data: ParcelDTO[];
     total: number;
@@ -96,6 +103,34 @@ const handleResponse = async (res: Response) => {
 };
 
 export const parcelApi = {
+    adminSearch: {
+        suggest: async (table: string, keyword: string, limit = 8): Promise<Array<{ name: string }>> => {
+            const t = (table || '').toLowerCase().trim();
+            const q = (keyword || '').trim();
+            if (!t || !q) return [];
+            const res = await fetch(`${API_URL}/api/admin-search/${encodeURIComponent(t)}/suggest?q=${encodeURIComponent(q)}&limit=${limit}`);
+            const data = await handleResponse(res);
+            return Array.isArray(data) ? data : [];
+        },
+        search: async (table: string, keyword: string, limit = 5): Promise<AdminSearchResult[]> => {
+            const t = (table || '').toLowerCase().trim();
+            const q = (keyword || '').trim();
+            if (!t || !q) return [];
+            const res = await fetch(`${API_URL}/api/admin-search/${encodeURIComponent(t)}?q=${encodeURIComponent(q)}&limit=${limit}`);
+            const data = await handleResponse(res);
+            return Array.isArray(data) ? data : [];
+        },
+        getByGid: async (table: string, gid: number): Promise<AdminSearchResult | null> => {
+            const t = (table || '').toLowerCase().trim();
+            const id = Number(gid);
+            if (!t || !Number.isFinite(id) || id <= 0) return null;
+            const res = await fetch(`${API_URL}/api/admin-search/${encodeURIComponent(t)}/by-gid/${id}`);
+            const data = await handleResponse(res);
+            if (!data || typeof data !== 'object') return null;
+            return data as AdminSearchResult;
+        }
+    },
+
     getAll: async (layer: string, filters?: { sodoto?: string, sothua?: string, tenchu?: string, diachi?: string }, pagination?: { page?: number; limit?: number }): Promise<ParcelListResponse> => {
         let queryString = `?t=${Date.now()}`;
         if (filters) {

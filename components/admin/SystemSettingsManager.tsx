@@ -26,6 +26,12 @@ const SETTING_METADATA: Record<string, { label: string; description: string; typ
     'default_zoom': { label: 'Mức Zoom mặc định', description: 'Mức zoom khi mới mở bản đồ (VD: 12)', type: 'number' },
     'map_max_zoom': { label: 'Mức Zoom tối đa', description: 'Mức zoom lớn nhất cho phép', type: 'number' },
     'map_min_zoom': { label: 'Mức Zoom tối thiểu', description: 'Mức zoom nhỏ nhất cho phép', type: 'number' },
+    'thematic_map_center_lat': { label: 'HC - Vĩ độ trung tâm (Lat)', description: 'Vĩ độ mặc định cho trang Đơn vị hành chính', type: 'number' },
+    'thematic_map_center_lng': { label: 'HC - Kinh độ trung tâm (Lng)', description: 'Kinh độ mặc định cho trang Đơn vị hành chính', type: 'number' },
+    'thematic_default_zoom': { label: 'HC - Zoom mặc định', description: 'Mức zoom mặc định cho trang Đơn vị hành chính', type: 'number' },
+    'thematic_map_max_zoom': { label: 'HC - Zoom tối đa', description: 'Mức zoom tối đa cho trang Đơn vị hành chính', type: 'number' },
+    'thematic_map_min_zoom': { label: 'HC - Zoom tối thiểu', description: 'Mức zoom tối thiểu cho trang Đơn vị hành chính', type: 'number' },
+    'thematic_default_basemap_id': { label: 'HC - Bản đồ nền mặc định', description: 'ID bản đồ nền mặc định cho trang Đơn vị hành chính', type: 'text' },
     'pdf_header_text': { label: 'Tiêu đề Header PDF', description: 'Dòng chữ in trên đầu trang PDF', type: 'text' },
     'pdf_footer_text': { label: 'Tiêu đề Footer PDF', description: 'Dòng chữ in dưới cùng trang PDF', type: 'text' }
 };
@@ -33,7 +39,7 @@ const SETTING_METADATA: Record<string, { label: string; description: string; typ
 // ─── Tab → keys mapping ──────────────────────────────────────────────────────
 const TAB_KEYS: Record<string, string[]> = {
     GENERAL: ['system_name', 'site_logo', 'site_favicon', 'maintenance_mode', 'allow_registration', 'footer_text'],
-    MAP:     ['map_center_lat', 'map_center_lng', 'default_zoom', 'map_max_zoom', 'map_min_zoom'],
+    MAP:     ['map_center_lat', 'map_center_lng', 'default_zoom', 'map_max_zoom', 'map_min_zoom', 'thematic_map_center_lat', 'thematic_map_center_lng', 'thematic_default_zoom', 'thematic_map_max_zoom', 'thematic_map_min_zoom', 'thematic_default_basemap_id'],
     PDF:     ['pdf_header_text', 'pdf_footer_text'],
     SEO:     ['seo_title', 'seo_description', 'seo_keywords', 'seo_og_image'],
     MAIL:    ['mail_host', 'mail_port', 'mail_user', 'mail_pass', 'mail_from_email', 'mail_from_name'],
@@ -44,9 +50,9 @@ const validate = (key: string, value: string): string => {
     if (!value) return '';
     if ((key === 'mail_user' || key === 'mail_from_email') && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Email không hợp lệ';
     if (key === 'mail_port') { const n = parseInt(value); if (isNaN(n) || n < 1 || n > 65535) return 'Port phải từ 1 → 65535'; }
-    if (key === 'map_center_lat') { const n = parseFloat(value); if (isNaN(n) || n < -90 || n > 90) return 'Vĩ độ phải từ -90 → 90'; }
-    if (key === 'map_center_lng') { const n = parseFloat(value); if (isNaN(n) || n < -180 || n > 180) return 'Kinh độ phải từ -180 → 180'; }
-    if (['default_zoom', 'map_max_zoom', 'map_min_zoom'].includes(key)) { const n = parseInt(value); if (isNaN(n) || n < 0 || n > 22) return 'Zoom phải từ 0 → 22'; }
+    if (key === 'map_center_lat' || key === 'thematic_map_center_lat') { const n = parseFloat(value); if (isNaN(n) || n < -90 || n > 90) return 'Vĩ độ phải từ -90 → 90'; }
+    if (key === 'map_center_lng' || key === 'thematic_map_center_lng') { const n = parseFloat(value); if (isNaN(n) || n < -180 || n > 180) return 'Kinh độ phải từ -180 → 180'; }
+    if (['default_zoom', 'map_max_zoom', 'map_min_zoom', 'thematic_default_zoom', 'thematic_map_max_zoom', 'thematic_map_min_zoom'].includes(key)) { const n = parseInt(value); if (isNaN(n) || n < 0 || n > 22) return 'Zoom phải từ 0 → 22'; }
     return '';
 };
 
@@ -59,6 +65,7 @@ const SystemSettingsManager: React.FC = () => {
     const [subTab, setSubTab] = useState<'GENERAL' | 'MAP' | 'PDF' | 'SEO' | 'MAIL' | 'STATUS' | 'BACKUP'>('GENERAL');
     const [loading, setLoading] = useState(false);
     const [serverInfo, setServerInfo] = useState<any>(null);
+    const [basemapOptions, setBasemapOptions] = useState<Array<{ id: string; name: string }>>([]);
 
     // Validation
     const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
@@ -132,9 +139,13 @@ const SystemSettingsManager: React.FC = () => {
     const loadData = async () => {
         setLoading(true);
         try {
-            const data: SystemSetting[] = await adminService.getSettings();
+            const [data, basemaps] = await Promise.all([
+                adminService.getSettings(),
+                adminService.getBasemaps().catch(() => [])
+            ]);
             setSettings(data);
             setSavedSettings(data.map(s => ({ ...s }))); // pristine copy
+            setBasemapOptions((Array.isArray(basemaps) ? basemaps : []).map((b: any) => ({ id: b.id, name: b.name || b.id })));
             if (!mailTestTo) {
                 const mailUser = data.find(s => s.key === 'mail_user')?.value || '';
                 setMailTestTo(mailUser);
@@ -333,6 +344,24 @@ const SystemSettingsManager: React.FC = () => {
             );
         }
 
+        if (key === 'thematic_default_basemap_id') {
+            return (
+                <div className="space-y-1">
+                    <select
+                        className={`w-full bg-gray-900 border rounded p-2.5 text-white outline-none font-medium transition-colors ${dirty ? 'border-yellow-500/60 focus:border-yellow-400' : 'border-gray-600 focus:border-blue-500'}`}
+                        value={setting.value || ''}
+                        onChange={e => updateSettingValue(key, e.target.value)}
+                    >
+                        <option value="">-- Theo mặc định hệ thống --</option>
+                        {basemapOptions.map((opt) => (
+                            <option key={opt.id} value={opt.id}>{opt.name} ({opt.id})</option>
+                        ))}
+                    </select>
+                    {dirty && <p className="text-[10px] text-yellow-500">● Chưa lưu</p>}
+                </div>
+            );
+        }
+
         // Password field with toggle
         if (key === 'mail_pass') {
             return (
@@ -435,7 +464,19 @@ const SystemSettingsManager: React.FC = () => {
 
                 {subTab === 'MAP' && (
                     <div className="space-y-6 animate-in fade-in duration-300">
+                        <div className="text-[11px] font-black uppercase tracking-wider text-cyan-400">Cấu hình bản đồ chung</div>
                         {['map_center_lat', 'map_center_lng', 'default_zoom', 'map_max_zoom', 'map_min_zoom'].map(key => (
+                            <div key={key} className="grid grid-cols-1 md:grid-cols-3 gap-4 border-b border-gray-700/50 pb-6 last:border-0 last:pb-0">
+                                <div className="col-span-1">
+                                    <label className="text-sm font-bold text-gray-200 block mb-1">{SETTING_METADATA[key]?.label || key}</label>
+                                    <span className="text-[10px] text-gray-500 font-mono italic">{SETTING_METADATA[key]?.description}</span>
+                                </div>
+                                <div className="col-span-2">{renderSettingInput(key)}</div>
+                            </div>
+                        ))}
+
+                        <div className="text-[11px] font-black uppercase tracking-wider text-indigo-400 pt-2">Trang Đơn vị hành chính</div>
+                        {['thematic_map_center_lat', 'thematic_map_center_lng', 'thematic_default_zoom', 'thematic_map_max_zoom', 'thematic_map_min_zoom', 'thematic_default_basemap_id'].map(key => (
                             <div key={key} className="grid grid-cols-1 md:grid-cols-3 gap-4 border-b border-gray-700/50 pb-6 last:border-0 last:pb-0">
                                 <div className="col-span-1">
                                     <label className="text-sm font-bold text-gray-200 block mb-1">{SETTING_METADATA[key]?.label || key}</label>

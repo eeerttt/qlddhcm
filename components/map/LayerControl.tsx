@@ -24,7 +24,7 @@ const LayerControl: React.FC<LayerControlProps> = ({
     onClearAll
 }) => {
     const [searchTerm, setSearchTerm] = useState('');
-    const [expandedGroup, setExpandedGroup] = useState<'PLANNING' | 'STANDARD' | 'BASEMAP' | null>('PLANNING');
+    const [expandedGroup, setExpandedGroup] = useState<'PLANNING' | 'STANDARD' | 'ADMINISTRATIVE' | 'BASEMAP' | null>('PLANNING');
 
     // Lọc lớp theo từ khóa tìm kiếm
     const filteredLayers = useMemo(() => {
@@ -39,6 +39,10 @@ const LayerControl: React.FC<LayerControlProps> = ({
 
     const planningLayers = useMemo(() => 
         filteredLayers.filter(l => l.category === 'PLANNING'),
+    [filteredLayers]);
+
+    const administrativeLayers = useMemo(() => 
+        filteredLayers.filter(l => l.category === 'ADMINISTRATIVE'),
     [filteredLayers]);
 
     const standardLayers = useMemo(() => 
@@ -69,7 +73,7 @@ const LayerControl: React.FC<LayerControlProps> = ({
                         <div className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
                             isVisible ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-500'
                         }`}>
-                            {l.category === 'PLANNING' ? <Landmark size={14}/> : <Layers size={14}/>}
+                            {l.category === 'PLANNING' ? <Landmark size={14}/> : l.category === 'ADMINISTRATIVE' ? <MapPin size={14}/> : <Layers size={14}/>}
                         </div>
                         <div className="flex flex-col min-w-0">
                             <span className={`text-[11px] font-bold truncate ${isVisible ? 'text-slate-900' : 'text-slate-600'}`}>
@@ -255,6 +259,27 @@ const LayerControl: React.FC<LayerControlProps> = ({
                 </div>
 
                 {/* NHÓM 3: CHUYÊN ĐỀ */}
+                <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white shadow-sm">
+                    <button 
+                        onClick={() => setExpandedGroup(expandedGroup === 'ADMINISTRATIVE' ? null : 'ADMINISTRATIVE')}
+                        className={`w-full flex items-center justify-between p-3 transition-colors ${expandedGroup === 'ADMINISTRATIVE' ? 'bg-indigo-50 text-indigo-700' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
+                    >
+                        <div className="flex items-center gap-2.5">
+                            <MapPin size={14}/>
+                            <span className="text-[10px] font-black uppercase tracking-widest">Lớp Hành chính ({administrativeLayers.length})</span>
+                        </div>
+                        {expandedGroup === 'ADMINISTRATIVE' ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+                    </button>
+                    {expandedGroup === 'ADMINISTRATIVE' && (
+                        <div className="p-2 space-y-1 bg-slate-50 max-h-[300px] overflow-y-auto custom-scrollbar animate-in slide-in-from-top-2 border-t border-slate-100">
+                            {administrativeLayers.length === 0 ? (
+                                <p className="text-[10px] text-slate-400 italic py-6 text-center">Không tìm thấy lớp phù hợp</p>
+                            ) : administrativeLayers.map(l => renderLayerItem(l))}
+                        </div>
+                    )}
+                </div>
+
+                {/* NHÓM 4: CHUYÊN ĐỀ */}
                 <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white shadow-sm">
                     <button 
                         onClick={() => setExpandedGroup(expandedGroup === 'STANDARD' ? null : 'STANDARD')}

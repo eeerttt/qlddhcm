@@ -14,7 +14,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
     const [basemaps, setBasemaps] = useState<BasemapConfig[]>([]);
     const [spatialTables, setSpatialTables] = useState<any[]>([]);
     const [globalQuery, setGlobalQuery] = useState('');
-    const [layerFilter, setLayerFilter] = useState<'ALL' | 'VISIBLE' | 'HIDDEN' | 'PLANNING' | 'STANDARD'>('ALL');
+    const [layerFilter, setLayerFilter] = useState<'ALL' | 'VISIBLE' | 'HIDDEN' | 'PLANNING' | 'STANDARD' | 'ADMINISTRATIVE'>('ALL');
     const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
     const [draggingBasemapId, setDraggingBasemapId] = useState<string | null>(null);
     const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
@@ -329,7 +329,8 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
         if (layerFilter === 'VISIBLE') return !!l.visible;
         if (layerFilter === 'HIDDEN') return !l.visible;
         if (layerFilter === 'PLANNING') return l.category === 'PLANNING';
-        if (layerFilter === 'STANDARD') return l.category !== 'PLANNING';
+        if (layerFilter === 'STANDARD') return (l.category || 'STANDARD') === 'STANDARD';
+        if (layerFilter === 'ADMINISTRATIVE') return l.category === 'ADMINISTRATIVE';
         return true;
     });
 
@@ -342,6 +343,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
         totalLayers: wmsLayers.length,
         visibleLayers: wmsLayers.filter((l) => l.visible).length,
         planningLayers: wmsLayers.filter((l) => l.category === 'PLANNING').length,
+        administrativeLayers: wmsLayers.filter((l) => l.category === 'ADMINISTRATIVE').length,
         totalTables: spatialTables.length,
         totalBasemaps: basemaps.length
     };
@@ -374,7 +376,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                 </div>
             </div>
 
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
                 <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
                     <p className="text-[10px] uppercase tracking-widest text-gray-500 font-black">Lớp dữ liệu</p>
                     <p className="text-2xl font-black text-cyan-400 mt-1">{stats.totalLayers}</p>
@@ -386,6 +388,10 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                 <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
                     <p className="text-[10px] uppercase tracking-widest text-gray-500 font-black">Lớp quy hoạch</p>
                     <p className="text-2xl font-black text-purple-400 mt-1">{stats.planningLayers}</p>
+                </div>
+                <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-black">Lớp hành chính</p>
+                    <p className="text-2xl font-black text-indigo-400 mt-1">{stats.administrativeLayers}</p>
                 </div>
                 <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
                     <p className="text-[10px] uppercase tracking-widest text-gray-500 font-black">Bảng registry</p>
@@ -412,6 +418,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                     <button onClick={() => setLayerFilter('VISIBLE')} className={`px-3 py-1.5 text-[10px] font-black rounded-lg uppercase ${layerFilter === 'VISIBLE' ? 'bg-emerald-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}>Đang hiện</button>
                     <button onClick={() => setLayerFilter('HIDDEN')} className={`px-3 py-1.5 text-[10px] font-black rounded-lg uppercase ${layerFilter === 'HIDDEN' ? 'bg-slate-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}>Đang ẩn</button>
                     <button onClick={() => setLayerFilter('PLANNING')} className={`px-3 py-1.5 text-[10px] font-black rounded-lg uppercase ${layerFilter === 'PLANNING' ? 'bg-purple-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}>Quy hoạch</button>
+                    <button onClick={() => setLayerFilter('ADMINISTRATIVE')} className={`px-3 py-1.5 text-[10px] font-black rounded-lg uppercase ${layerFilter === 'ADMINISTRATIVE' ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}>Hành chính</button>
                 </div>
             </div>
 
@@ -497,8 +504,8 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                                     <td className="p-4">
                                         <div className="flex flex-col">
                                             <span className="font-bold text-white">{l.name}</span>
-                                            <span className={`text-[8px] font-black uppercase w-fit px-1.5 rounded mt-1 border ${l.category === 'PLANNING' ? 'bg-purple-900/40 text-purple-400 border-purple-800' : 'bg-gray-900 text-gray-500 border-gray-800'}`}>
-                                                {l.category === 'PLANNING' ? 'Lớp Quy hoạch' : 'Lớp Chuyên đề'}
+                                            <span className={`text-[8px] font-black uppercase w-fit px-1.5 rounded mt-1 border ${l.category === 'PLANNING' ? 'bg-purple-900/40 text-purple-400 border-purple-800' : l.category === 'ADMINISTRATIVE' ? 'bg-indigo-900/40 text-indigo-400 border-indigo-800' : 'bg-gray-900 text-gray-500 border-gray-800'}`}>
+                                                {l.category === 'PLANNING' ? 'Lớp Quy hoạch' : l.category === 'ADMINISTRATIVE' ? 'Lớp Hành chính' : 'Lớp Chuyên đề'}
                                             </span>
                                         </div>
                                     </td>
@@ -649,9 +656,10 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
 
                                     <div>
                                         <label className="text-[10px] text-gray-500 font-black uppercase mb-3 block tracking-[0.15em]">Phân loại lớp bản đồ</label>
-                                        <div className="grid grid-cols-2 gap-2 bg-gray-900 p-1 rounded-xl">
+                                        <div className="grid grid-cols-3 gap-2 bg-gray-900 p-1 rounded-xl">
                                             <button onClick={() => setFormData({...formData, category: 'STANDARD'})} className={`py-2 text-[10px] font-black rounded-lg uppercase transition-all ${formData.category === 'STANDARD' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:text-gray-300'}`}>Chuyên đề</button>
                                             <button onClick={() => setFormData({...formData, category: 'PLANNING'})} className={`py-2 text-[10px] font-black rounded-lg uppercase transition-all ${formData.category === 'PLANNING' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-500 hover:text-gray-300'}`}>Quy hoạch</button>
+                                            <button onClick={() => setFormData({...formData, category: 'ADMINISTRATIVE'})} className={`py-2 text-[10px] font-black rounded-lg uppercase transition-all ${formData.category === 'ADMINISTRATIVE' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-500 hover:text-gray-300'}`}>Hành chính</button>
                                         </div>
                                     </div>
 

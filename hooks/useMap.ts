@@ -21,7 +21,11 @@ import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { smartMapProperties, measureStyle } from '../components/map/mapUtils';
 
-export const useMap = (user: User | null, systemSettings?: Record<string, string>) => {
+export const useMap = (
+    user: User | null,
+    systemSettings?: Record<string, string>,
+    layerVisibilityFilter?: (layer: WMSLayerConfig) => boolean
+) => {
     // Refs for Map Instance and Layers
     const mapInstance = useRef<Map | null>(null);
     const highlightLayer = useRef<VectorLayer<VectorSource> | null>(null);
@@ -373,12 +377,12 @@ export const useMap = (user: User | null, systemSettings?: Record<string, string
             if (selectedParcel) {
                 const updatedProperties = {
                     ...selectedParcel.properties,
-                    so_to: editFormData.sodoto,
-                    so_thua: editFormData.sothua,
-                    ownerName: editFormData.tenchu,
-                    address: editFormData.diachi,
-                    landType: editFormData.loaidat,
-                    area: editFormData.dientich,
+                    so_to: editFormData.sodoto || selectedParcel.properties.so_to,
+                    so_thua: editFormData.sothua || selectedParcel.properties.so_thua,
+                    ownerName: editFormData.tenchu || selectedParcel.properties.ownerName || '',
+                    address: editFormData.diachi || selectedParcel.properties.address,
+                    landType: editFormData.loaidat || selectedParcel.properties.landType || '',
+                    area: Number(editFormData.dientich ?? selectedParcel.properties.area ?? 0),
                 };
                 setSelectedParcel({ ...selectedParcel, properties: updatedProperties });
             }
@@ -469,13 +473,15 @@ export const useMap = (user: User | null, systemSettings?: Record<string, string
             ]);
             setAvailableLayers(layers);
             
-            const initialVisibleIds = layers.filter(l => l.visible).map(l => l.id);
+            const canRenderLayer = layerVisibilityFilter || (() => true);
+            const eligibleLayers = layers.filter(canRenderLayer);
+            const initialVisibleIds = eligibleLayers.filter(l => l.visible).map(l => l.id);
             if (initialVisibleIds.length > 0) {
                 setVisibleLayerIds(initialVisibleIds);
                 setActiveLayerId(initialVisibleIds[0]); 
-            } else if (layers.length > 0) {
-                setVisibleLayerIds([layers[0].id]);
-                setActiveLayerId(layers[0].id);
+            } else if (eligibleLayers.length > 0) {
+                setVisibleLayerIds([eligibleLayers[0].id]);
+                setActiveLayerId(eligibleLayers[0].id);
             }
 
             setSpatialTables(tables);
@@ -534,7 +540,8 @@ export const useMap = (user: User | null, systemSettings?: Record<string, string
 
     useEffect(() => {
         if (!wmsLayerGroup.current) return;
-        const olLayers = availableLayers.filter(l => visibleLayerIds.includes(l.id)).map(config => {
+        const canRenderLayer = layerVisibilityFilter || (() => true);
+        const olLayers = availableLayers.filter(l => visibleLayerIds.includes(l.id) && canRenderLayer(l)).map(config => {
             let source;
             if (config.type === 'XYZ') {
                 const proxiedUrl = `${API_URL}/api/proxy/forward?url=${encodeURIComponent(config.url)}`.split('%7Bz%7D').join('{z}').split('%7Bx%7D').join('{x}').split('%7By%7D').join('{y}');
@@ -557,7 +564,7 @@ export const useMap = (user: User | null, systemSettings?: Record<string, string
             return layer;
         });
         wmsLayerGroup.current.setLayers(new Collection(olLayers));
-    }, [availableLayers, visibleLayerIds, activeLayerId, wmsCacheBust]);
+    }, [availableLayers, visibleLayerIds, activeLayerId, wmsCacheBust, layerVisibilityFilter]);
 
     return {
         // Refs

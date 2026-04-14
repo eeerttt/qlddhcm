@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, Suspense, lazy } from 'react';
+import React, { useState, useEffect, Suspense, lazy, useRef } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import Login from './pages/Login';
@@ -9,6 +9,7 @@ import { adminService, authService } from './services/mockBackend';
 
 // Lazy Load các trang để tối ưu tốc độ tải bundle ban đầu
 const MapPage = lazy(() => import('./pages/MapPage'));
+const AdministrativeMapPage = lazy(() => import('./pages/administrativemap'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const AdminPage = lazy(() => import('./pages/AdminPage'));
 const UserProfile = lazy(() => import('./pages/UserProfile'));
@@ -37,6 +38,7 @@ const PageLoader = () => (
 // Bản đồ ánh xạ giữa ID Menu và URL Path
 const PATH_MAPPING: Record<string, string> = {
     'map': '/',
+    'thematic': '/donvihanhchinh',
     'dashboard': '/thongke',
     'editor': '/chinhsuabanve',
     'profile': '/hoso',
@@ -63,6 +65,8 @@ const App: React.FC = () => {
   const [systemSettings, setSystemSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [bootError, setBootError] = useState<string | null>(null);
+    const hasBootedRef = useRef(false);
+    const bootRunIdRef = useRef(0);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -74,11 +78,17 @@ const App: React.FC = () => {
                      (location.pathname.startsWith('/taomaqr') ? 'qr-generator' : 'map'));
 
   const boot = async () => {
+      const runId = ++bootRunIdRef.current;
       setLoading(true);
       setBootError(null);
       
-      const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error("Server không phản hồi kịp lúc (Timeout)")), 12000)
+      const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => {
+              if (runId === bootRunIdRef.current) {
+                  reject(new Error("Server không phản hồi kịp lúc (Timeout)"));
+              }
+          }, 12000);
+      }
       );
 
       try {
@@ -101,6 +111,8 @@ const App: React.FC = () => {
 
           const result: any = await Promise.race([loadDataPromise, timeoutPromise]);
           
+          if (runId !== bootRunIdRef.current) return;
+
           setSystemSettings(result.settingsMap);
           if (result.user) {
               setUser(result.user);
@@ -116,14 +128,20 @@ const App: React.FC = () => {
               }
           }
       } catch (e: any) {
+          if (runId !== bootRunIdRef.current) return;
           console.error("Khởi động thất bại:", e.message);
           setBootError(e.message || "Không thể kết nối đến máy chủ API.");
       } finally {
-          setLoading(false);
+          if (runId === bootRunIdRef.current) {
+              setLoading(false);
+          }
       }
   };
 
   useEffect(() => {
+      if (hasBootedRef.current) return;
+      hasBootedRef.current = true;
+
       const params = new URLSearchParams(window.location.search);
       if (params.get('token')) { setResetToken(params.get('token')); setShowLogin(true); }
       if (params.get('verificationToken')) { setVerificationToken(params.get('verificationToken')); setShowLogin(true); }
@@ -222,7 +240,7 @@ const App: React.FC = () => {
   );
 
   // Render 404 toàn màn hình — trước khi vào layout sidebar
-  const KNOWN_PATHS = ['/', '/giadata', '/taomaqr', '/gioithieu', '/thongke', '/chinhsuabanve', '/hoso', '/tinnhan', '/thongbao', '/quantri'];
+  const KNOWN_PATHS = ['/', '/donvihanhchinh', '/giadata', '/taomaqr', '/gioithieu', '/thongke', '/chinhsuabanve', '/hoso', '/tinnhan', '/thongbao', '/quantri'];
   const isKnownPath = KNOWN_PATHS.some(p => location.pathname === p || location.pathname.startsWith(p + '/'));
   if (!isKnownPath) return (
       <Suspense fallback={<PageLoader />}>
@@ -258,6 +276,7 @@ const App: React.FC = () => {
         <Suspense fallback={<PageLoader />}>
             <Routes>
                 <Route path="/" element={<MapPage user={user} systemSettings={systemSettings} />} />
+                <Route path="/donvihanhchinh" element={<AdministrativeMapPage user={user} systemSettings={systemSettings} />} />
                 <Route path="/giadata" element={<LandPriceLookup />} />
                 <Route path="/taomaqr" element={<QRGenerator />} />
                 <Route path="/gioithieu" element={<About />} />

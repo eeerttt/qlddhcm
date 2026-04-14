@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useCallback } from 'react';
-import { User } from '../types';
+import React, { useEffect, useRef, useCallback, useMemo } from 'react';
+import { User, WMSLayerConfig } from '../types';
 import { API_URL } from '../services/mockBackend';
 import Seo from '../components/Seo';
 
@@ -45,6 +45,7 @@ register(proj4);
 const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, string> }> = ({ user, systemSettings }) => {
     const mapElement = useRef<HTMLDivElement>(null);
     const popupElement = useRef<HTMLDivElement>(null);
+    const mapPageLayerFilter = useCallback((layer: WMSLayerConfig) => String(layer.category || 'STANDARD').toUpperCase() !== 'ADMINISTRATIVE', []);
 
     const {
         // Refs
@@ -96,7 +97,32 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
         handleActivateLayer,
         initData,
         handleClearAllLayers
-    } = useMap(user, systemSettings);
+    } = useMap(user, systemSettings, mapPageLayerFilter);
+
+    const mapPageLayers = useMemo(
+        () => availableLayers.filter((layer) => String(layer.category || 'STANDARD').toUpperCase() !== 'ADMINISTRATIVE'),
+        [availableLayers]
+    );
+
+    const mapPageLayerIdSet = useMemo(
+        () => new Set(mapPageLayers.map((layer) => layer.id)),
+        [mapPageLayers]
+    );
+
+    // Loại bỏ lớp hành chính khỏi MapPage để đảm bảo chỉ hiển thị ở trang riêng.
+    useEffect(() => {
+        setVisibleLayerIds((prev) => {
+            const next = prev.filter((id) => mapPageLayerIdSet.has(id));
+            return next.length === prev.length ? prev : next;
+        });
+    }, [mapPageLayerIdSet, setVisibleLayerIds]);
+
+    useEffect(() => {
+        if (activeLayerId && !mapPageLayerIdSet.has(activeLayerId)) {
+            const fallback = visibleLayerIds.find((id) => mapPageLayerIdSet.has(id)) || mapPageLayers[0]?.id || null;
+            setActiveLayerId(fallback);
+        }
+    }, [activeLayerId, visibleLayerIds, mapPageLayerIdSet, mapPageLayers, setActiveLayerId]);
 
     // Handle search coordinate result
     const handleSearchCoordinate = useCallback((lat: number, lon: number) => {
@@ -145,8 +171,9 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
         wmsLayerGroup.current = map.getLayers().getArray()[1] as LayerGroup;
         highlightLayer.current = map.getLayers().getArray()[2] as VectorLayer<VectorSource>;
         locationLayer.current = map.getLayers().getArray()[3] as VectorLayer<VectorSource>;
+        const popupHostElement = popupElement.current || document.createElement('div');
         overlayInstance.current = new Overlay({ 
-            element: popupElement.current!, 
+            element: popupHostElement, 
             autoPan: { animation: { duration: MAP_CONFIG.POPUP_ANIMATION_DURATION } }, 
             positioning: 'bottom-center' 
         });
@@ -247,6 +274,7 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
                 mouseCoord={mouseCoord} 
                 mapZoom={mapZoom} 
             />
+            <div ref={popupElement} className="hidden" />
             
             <div ref={mapElement} className="flex-1 w-full relative" />
             <MeasureTools activeMode={measureMode} onModeChange={setMeasureMode} onClear={() => measureSource.current.clear()} />
@@ -292,8 +320,8 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
                 basemaps={basemaps} 
                 activeBasemapId={activeBasemapId} 
                 onBaseLayerChange={setActiveBasemapId} 
-                availableLayers={availableLayers} 
-                visibleLayerIds={visibleLayerIds} 
+                availableLayers={mapPageLayers} 
+                visibleLayerIds={visibleLayerIds.filter((id) => mapPageLayerIdSet.has(id))} 
                 activeLayerId={activeLayerId} 
                 onToggleWMS={handleToggleWMS} 
                 onSetActiveWMS={handleActivateLayer} 

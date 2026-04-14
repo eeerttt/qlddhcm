@@ -24,6 +24,7 @@ const SCHEMA_CACHE = new Map();
 export default function(pool, logSystemAction) {
     const router = express.Router();
     const TABLE_NAME_REGEX = /^[a-z0-9_]+$/;
+    const ADMIN_NAME_COLUMN_CANDIDATES = ['ten_tinh', 'ten_tinh_tp', 'ten_dvhc', 'ten_don_vi', 'ten', 'name', 'province'];
 
     const resolveSafeTableName = async (rawTableName) => {
         const table = (rawTableName || '').toLowerCase().trim();
@@ -155,11 +156,46 @@ export default function(pool, logSystemAction) {
         }
     };
 
+    const resolveNameColumn = async (tableName) => {
+        const res = await pool.query(
+            `SELECT column_name FROM information_schema.columns WHERE table_name = $1`,
+            [tableName]
+        );
+        const dbCols = new Set(res.rows.map((r) => String(r.column_name || '').toLowerCase()));
+        for (const candidate of ADMIN_NAME_COLUMN_CANDIDATES) {
+            if (dbCols.has(candidate)) return candidate;
+        }
+        return null;
+    };
+
+    const getTableColumns = async (tableName) => {
+        const res = await pool.query(
+            `SELECT column_name FROM information_schema.columns WHERE table_name = $1`,
+            [tableName]
+        );
+        return new Set(res.rows.map((r) => String(r.column_name || '').toLowerCase()));
+    };
+
     router.get('/spatial-tables', async (req, res) => {
         try {
             const result = await pool.query(`SELECT * FROM spatial_tables_registry ORDER BY created_at DESC`);
             res.json(result.rows);
-        } catch (e) { res.status(500).json({ error: e.message }); }
+        } catch (e) {
+            // Backward compatibility: some deployments may not have created_at yet.
+            if (e?.code === '42703') {
+                try {
+                    const fallback = await pool.query(`
+                        SELECT *, NOW() AS created_at
+                        FROM spatial_tables_registry
+                        ORDER BY table_name ASC
+                    `);
+                    return res.json(fallback.rows);
+                } catch (fallbackError) {
+                    return res.status(500).json({ error: fallbackError.message });
+                }
+            }
+            res.status(500).json({ error: e.message });
+        }
     });
 
     router.post('/spatial-tables/sync/:table', authenticateToken, async (req, res) => {
@@ -249,6 +285,155 @@ export default function(pool, logSystemAction) {
             SCHEMA_CACHE.delete(tableName);
             res.json({ status: 'ok' });
         } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    // Public endpoint for fast administrative name suggestions.
+    router.get('/admin-search/:table/suggest', async (req, res) => {
+        try {
+            const q = String(req.query.q || '').trim();
+            const limit = Math.min(Math.max(parseInt(String(req.query.limit || '8'), 10) || 8, 1), 20);
+            if (!q) return res.json([]);
+
+            let table;
+            try {
+                table = await resolveSafeTableName(req.params.table);
+            } catch (_) {
+                return res.json([]);
+            }
+            const nameCol = await resolveNameColumn(table);
+            if (!nameCol) return res.json([]);
+
+            const query = `
+                SELECT DISTINCT "${nameCol}"::text as name
+                FROM "${table}"
+                WHERE "${nameCol}" IS NOT NULL
+                  AND "${nameCol}"::text ILIKE $1
+                ORDER BY "${nameCol}"::text ASC
+                LIMIT $2
+            `;
+            const result = await pool.query(query, [`%${q}%`, limit]);
+            res.json(result.rows.map((r) => ({ name: r.name }))); 
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    // Public endpoint for fast administrative lookup and highlight geometry.
+    router.get('/admin-search/:table', async (req, res) => {
+        try {
+            const q = String(req.query.q || '').trim();
+            const limit = Math.min(Math.max(parseInt(String(req.query.limit || '5'), 10) || 5, 1), 50);
+            if (!q) return res.json([]);
+
+            let table;
+            try {
+                table = await resolveSafeTableName(req.params.table);
+            } catch (_) {
+                return res.json([]);
+            }
+            const nameCol = await resolveNameColumn(table);
+            if (!nameCol) return res.json([]);
+
+            const existingCols = await getTableColumns(table);
+            if (!existingCols.has('geometry')) return res.json([]);
+
+            const optionalCols = ['ma_tinh', 'ten_tinh', 'sap_nhap', 'quy_mo', 'tru_so', 'loai', 'cap', 'dtich_km2', 'dan_so', 'matdo_km2', 'name', 'ten', 'province'];
+            const selectedOptional = optionalCols.filter((c) => existingCols.has(c));
+            const optionalSelect = selectedOptional.map((c) => `"${c}"::text as "${c}"`).join(', ');
+            const optionalSql = optionalSelect ? `, ${optionalSelect}` : '';
+
+            const query = `
+                SELECT
+                    gid,
+                    "${nameCol}"::text as display_name,
+                    ST_AsGeoJSON(
+                        CASE 
+                            WHEN ST_SRID(geometry) = 0 THEN ST_SetSRID(geometry, 4326)
+                            WHEN ST_SRID(geometry) = 4326 THEN geometry
+                            ELSE ST_Transform(geometry, 4326)
+                        END
+                    ) as geometry
+                    ${optionalSql}
+                FROM "${table}"
+                WHERE "${nameCol}" IS NOT NULL
+                  AND "${nameCol}"::text ILIKE $1
+                ORDER BY "${nameCol}"::text ASC
+                LIMIT $2
+            `;
+            const result = await pool.query(query, [`%${q}%`, limit]);
+            const data = result.rows.map((row) => ({
+                gid: row.gid,
+                name: row.display_name,
+                properties: selectedOptional.reduce((acc, key) => {
+                    if (row[key] !== undefined && row[key] !== null) acc[key] = row[key];
+                    return acc;
+                }, {}),
+                geometry: row.geometry ? JSON.parse(row.geometry) : null
+            }));
+            res.json(data);
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    // Public endpoint: fetch one administrative feature by gid for click-highlight fallback.
+    router.get('/admin-search/:table/by-gid/:gid', async (req, res) => {
+        try {
+            const gid = parseInt(String(req.params.gid || '0'), 10);
+            if (!Number.isFinite(gid) || gid <= 0) return res.json(null);
+
+            let table;
+            try {
+                table = await resolveSafeTableName(req.params.table);
+            } catch (_) {
+                return res.json(null);
+            }
+
+            const existingCols = await getTableColumns(table);
+            if (!existingCols.has('geometry')) return res.json(null);
+
+            const nameCol = await resolveNameColumn(table);
+            const optionalCols = ['ma_tinh', 'ten_tinh', 'sap_nhap', 'quy_mo', 'tru_so', 'loai', 'cap', 'dtich_km2', 'dan_so', 'matdo_km2', 'name', 'ten', 'province'];
+            const selectedOptional = optionalCols.filter((c) => existingCols.has(c));
+            const optionalSelect = selectedOptional.map((c) => `"${c}"::text as "${c}"`).join(', ');
+            const optionalSql = optionalSelect ? `, ${optionalSelect}` : '';
+            const nameSelect = nameCol ? `, "${nameCol}"::text as display_name` : '';
+
+            const query = `
+                SELECT
+                    gid
+                    ${nameSelect}
+                    ${optionalSql},
+                    ST_AsGeoJSON(
+                        CASE 
+                            WHEN ST_SRID(geometry) = 0 THEN ST_SetSRID(geometry, 4326)
+                            WHEN ST_SRID(geometry) = 4326 THEN geometry
+                            ELSE ST_Transform(geometry, 4326)
+                        END
+                    ) as geometry
+                FROM "${table}"
+                WHERE gid = $1
+                LIMIT 1
+            `;
+            const result = await pool.query(query, [gid]);
+            if (result.rowCount === 0) return res.json(null);
+
+            const row = result.rows[0];
+            const properties = selectedOptional.reduce((acc, key) => {
+                if (row[key] !== undefined && row[key] !== null) acc[key] = row[key];
+                return acc;
+            }, {});
+            if (row.display_name) properties.ten_tinh = properties.ten_tinh || row.display_name;
+
+            res.json({
+                gid: row.gid,
+                name: row.display_name || '',
+                properties,
+                geometry: row.geometry ? JSON.parse(row.geometry) : null
+            });
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
     });
 
     router.get('/data/:table', authenticateToken, async (req, res) => {
