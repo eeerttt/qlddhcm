@@ -7,7 +7,6 @@ import { parcelApi, AdminSearchResult } from '../services/parcelApi';
 
 import { useMap } from '../hooks/useMap';
 
-import MapLegend from '../components/map/MapLegend';
 import MapStatusIndicators from '../components/map/MapStatusIndicators';
 import MapInfoOverlay from '../components/map/MapInfoOverlay';
 import MapControls from '../components/map/MapControls';
@@ -68,7 +67,6 @@ const ThematicMapPage: React.FC<{ user: User | null; systemSettings?: Record<str
         activeLayerId, setActiveLayerId,
         basemaps, setBasemaps,
         activeBasemapId, setActiveBasemapId,
-        isLegendOpen, setIsLegendOpen,
         isInitialLoading, setIsInitialLoading,
         mapRotation, setMapRotation,
         mapZoom, setMapZoom,
@@ -1151,14 +1149,7 @@ const ThematicMapPage: React.FC<{ user: User | null; systemSettings?: Record<str
                 mapInstance={mapInstance.current} 
                 mapRotation={mapRotation} 
                 isLocating={false} 
-                isLegendOpen={isLegendOpen} 
                 onLocate={handleLocateUser} 
-                onToggleLegend={() => setIsLegendOpen(!isLegendOpen)} 
-            />
-
-            <MapLegend 
-                isOpen={isLegendOpen} 
-                onClose={() => setIsLegendOpen(false)} 
             />
 
             <MapDialog 
