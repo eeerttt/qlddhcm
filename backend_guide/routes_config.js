@@ -33,20 +33,20 @@ export default function(pool, logSystemAction) {
     router.get('/branches', async (req, res) => {
         try { res.json((await pool.query(`SELECT * FROM branches ORDER BY name`)).rows); } catch (e) { res.status(500).json({ error: e.message }); }
     });
-    router.post('/branches', authenticateToken, async (req, res) => {
+    router.post('/branches', authenticateToken, requireAdmin, async (req, res) => {
         try {
             const id = 'br-' + Date.now();
             await pool.query(`INSERT INTO branches (id, code, name, address) VALUES ($1, $2, $3, $4)`, [id, req.body.code, req.body.name, req.body.address]);
             res.json({ status: 'ok' });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
-    router.put('/branches/:id', authenticateToken, async (req, res) => {
+    router.put('/branches/:id', authenticateToken, requireAdmin, async (req, res) => {
         try {
             await pool.query(`UPDATE branches SET code=$1, name=$2, address=$3 WHERE id=$4`, [req.body.code, req.body.name, req.body.address, req.params.id]);
             res.json({ status: 'ok' });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
-    router.delete('/branches/:id', authenticateToken, async (req, res) => {
+    router.delete('/branches/:id', authenticateToken, requireAdmin, async (req, res) => {
         try {
             await pool.query(`DELETE FROM branches WHERE id=$1`, [req.params.id]);
             res.json({ status: 'ok' });

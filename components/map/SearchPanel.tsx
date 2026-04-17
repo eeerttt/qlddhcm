@@ -51,18 +51,26 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onToggle, spatialTabl
 
     const handleSearch = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        const normalizedFilters = {
+            table: searchForm.table.trim(),
+            soTo: searchForm.soTo.trim(),
+            soThua: searchForm.soThua.trim(),
+            owner: searchForm.owner.trim(),
+            address: searchForm.address.trim()
+        };
         
         if (searchMode === 'COORD') {
             handleCoordSearch();
             return;
         }
 
-        if (!searchForm.table) {
+        if (!normalizedFilters.table) {
             setError("Vui lòng chọn khu vực dữ liệu.");
             return;
         }
 
-        if (!searchForm.soTo.trim() && !searchForm.soThua.trim() && !searchForm.owner.trim() && !searchForm.address.trim()) {
+        if (!normalizedFilters.soTo && !normalizedFilters.soThua && !normalizedFilters.owner && !normalizedFilters.address) {
             setError("Vui lòng nhập ít nhất một thông tin lọc.");
             return;
         }
@@ -71,15 +79,16 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onToggle, spatialTabl
         setError(null);
         setHasSearched(true);
         try {
-            const res = await gisService.searchParcels(searchForm.table, { 
-                sodoto: searchForm.soTo, 
-                sothua: searchForm.soThua, 
-                tenchu: searchForm.owner,
-                diachi: searchForm.address
+            const res = await gisService.searchParcels(normalizedFilters.table, {
+                sodoto: normalizedFilters.soTo,
+                sothua: normalizedFilters.soThua,
+                tenchu: normalizedFilters.owner,
+                diachi: normalizedFilters.address
             });
             setResults(res);
         } catch (err: any) {
-            setError("Lỗi kết nối máy chủ.");
+            const message = typeof err?.message === 'string' ? err.message : '';
+            setError(message || "Lỗi kết nối máy chủ.");
             setResults([]);
         } finally { setLoading(false); }
     };

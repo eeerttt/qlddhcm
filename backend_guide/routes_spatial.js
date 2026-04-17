@@ -436,7 +436,8 @@ export default function(pool, logSystemAction) {
         }
     });
 
-    router.get('/data/:table', authenticateToken, async (req, res) => {
+    // Public read endpoint used by MapPage search panel.
+    router.get('/data/:table', async (req, res) => {
         const { sodoto, sothua, tenchu, diachi } = req.query;
         try {
             const table = await resolveSafeTableName(req.params.table);
@@ -740,7 +741,8 @@ export default function(pool, logSystemAction) {
         }
     });
 
-    router.get('/data/:table/extent', authenticateToken, async (req, res) => {
+    // Public read endpoint for layer extent/zoom actions.
+    router.get('/data/:table/extent', async (req, res) => {
         try {
             const table = await resolveSafeTableName(req.params.table);
             const result = await pool.query(`SELECT ST_XMin(ext) as xmin, ST_YMin(ext) as ymin, ST_XMax(ext) as xmax, ST_YMax(ext) as ymax FROM (SELECT ST_Extent(geometry) as ext FROM "${table}") as t`);

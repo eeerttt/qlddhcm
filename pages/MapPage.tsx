@@ -109,6 +109,32 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
         [mapPageLayers]
     );
 
+    const mapPageSearchTableSet = useMemo(() => {
+        const set = new Set<string>();
+        mapPageLayers.forEach((layer) => {
+            const layerNames = String(layer.layers || '')
+                .split(',')
+                .map((name) => name.trim())
+                .filter(Boolean);
+
+            layerNames.forEach((name) => {
+                const tableName = name.includes(':') ? name.split(':').pop() : name;
+                if (tableName) {
+                    set.add(tableName.toLowerCase());
+                }
+            });
+        });
+        return set;
+    }, [mapPageLayers]);
+
+    const mapPageSpatialTables = useMemo(
+        () => {
+            const filtered = spatialTables.filter((table) => mapPageSearchTableSet.has(String(table.table_name || '').toLowerCase()));
+            return filtered.length > 0 ? filtered : spatialTables;
+        },
+        [spatialTables, mapPageSearchTableSet]
+    );
+
     // Loại bỏ lớp hành chính khỏi MapPage để đảm bảo chỉ hiển thị ở trang riêng.
     useEffect(() => {
         setVisibleLayerIds((prev) => {
@@ -309,7 +335,7 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
             <SearchPanel 
                 isOpen={isSearchOpen} 
                 onToggle={() => setIsSearchOpen(!isSearchOpen)} 
-                spatialTables={spatialTables} 
+                spatialTables={mapPageSpatialTables} 
                 onSelectResult={handleSelectResult} 
                 onSearchCoordinate={handleSearchCoordinate} 
             />

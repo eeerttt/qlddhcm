@@ -64,7 +64,11 @@ const getAuthHeaders = () => {
     return headers;
 };
 
-const apiCall = async (endpoint: string, options?: RequestInit) => {
+const apiCall = async (
+    endpoint: string,
+    options?: RequestInit,
+    config?: { suppressAuthReload?: boolean }
+) => {
     const cleanEndpoint = endpoint.startsWith('/api') ? endpoint : `/api${endpoint}`;
     const finalUrl = `${API_URL}${cleanEndpoint}`;
     try {
@@ -77,7 +81,9 @@ const apiCall = async (endpoint: string, options?: RequestInit) => {
             if (!endpoint.includes('/login')) { // Tránh loop nếu đang login
                 localStorage.removeItem('geo_token');
                 localStorage.removeItem('geo_user');
-                window.location.reload(); // Reload để app đẩy về trang login
+                if (!config?.suppressAuthReload) {
+                    window.location.reload(); // Reload để app đẩy về trang login
+                }
                 throw new Error("Phiên làm việc hết hạn. Vui lòng đăng nhập lại.");
             }
         }
@@ -99,6 +105,16 @@ const apiCall = async (endpoint: string, options?: RequestInit) => {
         }
         return responseData;
     } catch (error: any) { throw error; }
+};
+
+const pickFirstValue = (source: Record<string, any>, keys: string[]) => {
+    for (const key of keys) {
+        const value = source?.[key];
+        if (value !== undefined && value !== null && value !== '') {
+            return value;
+        }
+    }
+    return undefined;
 };
 
 export const notificationService = {
@@ -142,18 +158,57 @@ export const gisService = {
     getExtent: async (tableName: string): Promise<any> => { try { return await apiCall(`/data/${tableName}/extent`); } catch { return null; } },
     searchParcels: async (tableName: string, filters: any): Promise<LandParcel[]> => {
         try {
+             const normalizedTableName = String(tableName || '').trim().toLowerCase();
+             const normalizedFilters = {
+                sodoto: String(filters?.sodoto || '').trim(),
+                sothua: String(filters?.sothua || '').trim(),
+                tenchu: String(filters?.tenchu || '').trim(),
+                diachi: String(filters?.diachi || '').trim()
+             };
+
              let qs = `?t=${Date.now()}`;
-             if (filters.sodoto) qs += `&sodoto=${encodeURIComponent(filters.sodoto)}`;
-             if (filters.sothua) qs += `&sothua=${encodeURIComponent(filters.sothua)}`;
-             if (filters.tenchu) qs += `&tenchu=${encodeURIComponent(filters.tenchu)}`;
-             if (filters.diachi) qs += `&diachi=${encodeURIComponent(filters.diachi)}`;
-             const data = await apiCall(`/data/${tableName}${qs}`);
-             if (!Array.isArray(data)) return [];
-             return data.map((item: any) => ({
-                 id: item.gid?.toString() || `p-${Math.random()}`, gid: item.gid, geometry: item.geometry,
-                 properties: { ...item, so_to: item.sodoto, so_thua: item.sothua, ownerName: item.tenchu, address: item.diachi, area: item.dientich, landType: item.loaidat || item.kyhieumucd || 'Chưa cập nhật', tableName: tableName }
-             }));
-        } catch { return []; }
+             if (normalizedFilters.sodoto) qs += `&sodoto=${encodeURIComponent(normalizedFilters.sodoto)}`;
+             if (normalizedFilters.sothua) qs += `&sothua=${encodeURIComponent(normalizedFilters.sothua)}`;
+             if (normalizedFilters.tenchu) qs += `&tenchu=${encodeURIComponent(normalizedFilters.tenchu)}`;
+             if (normalizedFilters.diachi) qs += `&diachi=${encodeURIComponent(normalizedFilters.diachi)}`;
+
+             const payload = await apiCall(`/data/${encodeURIComponent(normalizedTableName)}${qs}`, undefined, { suppressAuthReload: true });
+             const rows = Array.isArray(payload)
+                ? payload
+                : (Array.isArray(payload?.data) ? payload.data : []);
+
+             if (!Array.isArray(rows)) return [];
+
+             return rows.map((item: any, index: number) => {
+                 const soTo = pickFirstValue(item, ['sodoto', 'so_to', 'shbando', 'sh_ban_do', 'tobando']);
+                 const soThua = pickFirstValue(item, ['sothua', 'so_thua', 'shthua', 'sh_thua', 'thua_dat']);
+                 const ownerName = pickFirstValue(item, ['tenchu', 'ten_chu', 'ownerName', 'owner_name', 'chusudung']);
+                 const address = pickFirstValue(item, ['diachi', 'dia_chi', 'address', 'location', 'vitri', 'vi_tri']);
+                 const area = pickFirstValue(item, ['dientich', 'dien_tich', 'area', 'shape_area', 'st_area']);
+                 const landType = pickFirstValue(item, ['loaidat', 'loai_dat', 'kyhieumucd', 'ky_hieu_muc_dich', 'mucdich', 'mdsd']);
+                 const geometry = typeof item.geometry === 'string' ? JSON.parse(item.geometry) : item.geometry;
+                 const gid = Number(item.gid);
+                 const fallbackId = [normalizedTableName, soTo, soThua, index].filter(Boolean).join('-') || `p-${index}`;
+
+                 return {
+                     id: Number.isFinite(gid) && gid > 0 ? String(gid) : fallbackId,
+                     gid: Number.isFinite(gid) && gid > 0 ? gid : item.gid,
+                     geometry,
+                     properties: {
+                         ...item,
+                         so_to: soTo,
+                         so_thua: soThua,
+                         ownerName,
+                         address,
+                         area,
+                         landType: landType || 'Chưa cập nhật',
+                         tableName: normalizedTableName
+                     }
+                 };
+             });
+        } catch (error) {
+            throw error;
+        }
     }
 };
 

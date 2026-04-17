@@ -1,6 +1,6 @@
 {
   "name": "QLDDHCM",
-  "description": "Professional WebGIS for Land Management with Real-time Dashboard, PostGIS logic, and Role-Based Access Control.",
+  "description": "Hệ thống WebGIS chuyên nghiệp dành cho quản lý đất đai với bảng điều khiển thời gian thực, logic PostGIS và kiểm soát truy cập dựa trên vai trò.",
   "requestFramePermissions": [
     "geolocation"
   ]
