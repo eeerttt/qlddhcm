@@ -2,11 +2,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { LandParcel, User } from '../../types';
 import QRCode from 'qrcode';
+import { resolvePdfTemplateSettings } from '../../utils/pdfTemplatePresets';
 
 interface PrintTemplateProps {
     parcel: LandParcel;
     user?: User | null;
     systemSettings?: Record<string, string>;
+    templateId?: string;
 }
 
 interface GeometryPoint {
@@ -16,7 +18,7 @@ interface GeometryPoint {
     distanceNext?: string;
 }
 
-const PrintTemplate: React.FC<PrintTemplateProps> = ({ parcel, user, systemSettings }) => {
+const PrintTemplate: React.FC<PrintTemplateProps> = ({ parcel, user, systemSettings, templateId = 'print-template' }) => {
     const formData = parcel.properties;
     const parcelCanvasRef = useRef<HTMLCanvasElement>(null);
     const [geometryPoints, setGeometryPoints] = useState<GeometryPoint[]>([]);
@@ -180,6 +182,124 @@ const PrintTemplate: React.FC<PrintTemplateProps> = ({ parcel, user, systemSetti
     for (let i = 0; i < tailRows.length; i += nextPageRows) {
         extraChunks.push(tailRows.slice(i, i + nextPageRows));
     }
+    const effectiveSettings = resolvePdfTemplateSettings(systemSettings);
+    const pdfHeader1 = effectiveSettings.pdf_header_1 || 'CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM';
+    const pdfHeader2 = effectiveSettings.pdf_header_2 || 'Độc lập - Tự do - Hạnh phúc';
+    const pdfTitle = effectiveSettings.pdf_title || effectiveSettings.pdf_header_text || 'TRÍCH LỤC BẢN ĐỒ ĐỊA CHÍNH';
+    const pdfLocationText = effectiveSettings.pdf_location_text || 'TP. Hồ Chí Minh';
+    const pdfSignerTitle = effectiveSettings.pdf_signer_title || 'Người trích lục';
+    const pdfSignerName = effectiveSettings.pdf_signer_name || user?.name || 'HỆ THỐNG WEBGIS';
+    const pdfNoteText = effectiveSettings.pdf_note_text || '';
+    const pdfFooterText = effectiveSettings.pdf_footer_text || effectiveSettings.footer_text || 'Trung tâm dữ liệu GIS';
+    const showQr = effectiveSettings.pdf_show_qr !== 'false';
+    const showSigner = effectiveSettings.pdf_show_signer !== 'false';
+    const showSignatureImage = effectiveSettings.pdf_show_signature_image !== 'false';
+    const showStamp = effectiveSettings.pdf_show_stamp !== 'false';
+    const signatureStyle = String(effectiveSettings.pdf_signature_style || 'HANDWRITTEN').toUpperCase();
+    const signatureImage = effectiveSettings.pdf_signature_image || '';
+    const stampImage = effectiveSettings.pdf_stamp_image || '';
+    const signatureWidth = Math.max(80, Number(effectiveSettings.pdf_signature_width || 160));
+    const signatureHeight = Math.max(36, Number(effectiveSettings.pdf_signature_height || 62));
+    const stampSize = Math.max(76, Math.min(112, Math.round(signatureWidth * 0.62)));
+    const stampTransform = `translate(-5%, -28%) rotate(-18deg)`;
+
+    const signatureFontFamily = signatureStyle === 'DIGITAL'
+        ? '"Segoe Script", "Brush Script MT", cursive'
+        : signatureStyle === 'FORMAL'
+            ? '"Times New Roman", serif'
+            : '"Brush Script MT", "Segoe Script", cursive';
+    const signatureColor = signatureStyle === 'DIGITAL' ? '#1d4ed8' : '#111827';
+    const signatureLabel = signatureStyle === 'DIGITAL' ? 'Ký số xác nhận' : signatureStyle === 'FORMAL' ? 'Ký duyệt hồ sơ' : 'Chữ ký xác nhận';
+
+    const renderSignerBlock = () => {
+        if (!showSigner) return null;
+
+        return (
+            <div style={{ textAlign: 'center', width: '300px' }}>
+                <p style={{ fontStyle: 'italic', fontSize: '13px', color: '#000000', margin: '0' }}>
+                    {pdfLocationText}, ngày {new Date().getDate()} tháng {new Date().getMonth() + 1} năm {new Date().getFullYear()}
+                </p>
+                <p style={{ fontWeight: 'bold', textTransform: 'uppercase', fontSize: '13px', color: '#000000', margin: '5px 0 8px' }}>
+                    {pdfSignerTitle}
+                </p>
+                <div style={{ position: 'relative', height: `${Math.max(signatureHeight + 16, 68)}px`, marginBottom: '4px' }}>
+                    {showSignatureImage && signatureImage ? (
+                        <img
+                            src={signatureImage}
+                            alt="signature"
+                            style={{
+                                maxWidth: `${signatureWidth}px`,
+                                maxHeight: `${signatureHeight}px`,
+                                objectFit: 'contain',
+                                margin: '0 auto',
+                                display: 'block',
+                                filter: signatureStyle === 'DIGITAL' ? 'hue-rotate(180deg) saturate(1.2)' : 'none'
+                            }}
+                        />
+                    ) : (
+                        <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+                            <span style={{ fontSize: '10px', color: '#6b7280', marginBottom: '2px' }}>{signatureLabel}</span>
+                            <span style={{ fontFamily: signatureFontFamily, fontSize: signatureStyle === 'FORMAL' ? '22px' : '28px', color: signatureColor, fontWeight: signatureStyle === 'FORMAL' ? 700 : 500 }}>
+                                {pdfSignerName}
+                            </span>
+                        </div>
+                    )}
+
+                    {showStamp && (
+                        stampImage ? (
+                            <img
+                                src={stampImage}
+                                alt="stamp"
+                                style={{
+                                    position: 'absolute',
+                                    left: '50%',
+                                    top: '50%',
+                                    width: `${stampSize}px`,
+                                    height: `${stampSize}px`,
+                                    objectFit: 'contain',
+                                    opacity: 0.82,
+                                    transform: stampTransform,
+                                    transformOrigin: 'center',
+                                    zIndex: 2,
+                                    pointerEvents: 'none'
+                                }}
+                            />
+                        ) : (
+                            <div style={{
+                                position: 'absolute',
+                                left: '50%',
+                                top: '50%',
+                                width: `${stampSize}px`,
+                                height: `${stampSize}px`,
+                                border: '2px solid #dc2626',
+                                borderRadius: '50%',
+                                color: '#dc2626',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                textAlign: 'center',
+                                fontSize: '9px',
+                                lineHeight: 1.2,
+                                fontWeight: 'bold',
+                                opacity: 0.72,
+                                transform: stampTransform,
+                                transformOrigin: 'center',
+                                zIndex: 2,
+                                pointerEvents: 'none'
+                            }}>
+                                MỘC
+                                <br />
+                                XÁC NHẬN
+                            </div>
+                        )
+                    )}
+                </div>
+                <p style={{ fontWeight: 'bold', textTransform: 'uppercase', fontSize: '14px', color: '#000000', margin: '6px 0 0 0' }}>
+                    {pdfSignerName}
+                </p>
+            </div>
+        );
+    };
 
     const renderTable = (rows: GeometryPoint[]) => (
         <table style={{
@@ -216,7 +336,7 @@ const PrintTemplate: React.FC<PrintTemplateProps> = ({ parcel, user, systemSetti
     );
 
     return (
-        <div id="print-template" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        <div id={templateId} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <div className="print-page" style={{
                 width: "794px",
                 minHeight: "1123px",
@@ -231,15 +351,15 @@ const PrintTemplate: React.FC<PrintTemplateProps> = ({ parcel, user, systemSetti
             }}>
                 <div style={{ textAlign: "center", marginBottom: "10px" }}>
                     <h3 style={{ fontWeight: "bold", fontSize: "14px", textTransform: "uppercase", margin: "0", color: "#000000" }}>
-                        {systemSettings?.pdf_header_1 || "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM"}
+                        {pdfHeader1}
                     </h3>
                     <p style={{ fontWeight: "bold", fontSize: "13px", margin: "4px 0", display: "inline-block", borderBottom: "1.5px solid #000", paddingBottom: "5px", color: "#000000" }}>
-                        {systemSettings?.pdf_header_2 || "Độc lập - Tự do - Hạnh phúc"}
+                        {pdfHeader2}
                     </p>
                 </div>
 
                 <h1 style={{ fontSize: "19px", fontWeight: "bold", textTransform: "uppercase", margin: "20px 0", textAlign: "center", color: "#000000" }}>
-                    {systemSettings?.pdf_title || "TRÍCH LỤC BẢN ĐỒ ĐỊA CHÍNH"}
+                    {pdfTitle}
                 </h1>
 
                 <div style={{ fontSize: "14px", lineHeight: "1.5", marginBottom: "10px", color: "#000000" }}>
@@ -262,6 +382,12 @@ const PrintTemplate: React.FC<PrintTemplateProps> = ({ parcel, user, systemSetti
                     </div>
                 </div>
 
+                {pdfNoteText && (
+                    <div style={{ marginBottom: "10px", padding: "8px 10px", border: "1px dashed #000", fontSize: "12px", fontStyle: "italic", backgroundColor: "#faf7e8" }}>
+                        <strong>Ghi chú:</strong> {pdfNoteText}
+                    </div>
+                )}
+
                 <div style={{ width: "100%", marginBottom: "15px" }}>
                     <p style={{ fontWeight: "bold", fontSize: "13px", marginBottom: "5px", fontStyle: "italic", color: "#000000" }}>6. Bảng kê tọa độ và khoảng cách:</p>
                     {renderTable(firstRows)}
@@ -271,24 +397,15 @@ const PrintTemplate: React.FC<PrintTemplateProps> = ({ parcel, user, systemSetti
                     <>
                         <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: "auto", paddingBottom: "10px" }}>
                             <div style={{ textAlign: "center", width: "120px" }}>
-                                {qrCodeUrl && <img src={qrCodeUrl} alt="QR Verify" style={{ width: "70px", height: "70px", border: "1px solid #000", padding: "1px" }} />}
-                                <p style={{ fontSize: "8px", color: "#000000", marginTop: "4px", fontStyle: "italic" }}>Quét xác thực</p>
+                                {showQr && qrCodeUrl && <img src={qrCodeUrl} alt="QR Verify" style={{ width: "70px", height: "70px", border: "1px solid #000", padding: "1px" }} />}
+                                {showQr && <p style={{ fontSize: "8px", color: "#000000", marginTop: "4px", fontStyle: "italic" }}>Quét xác thực</p>}
                             </div>
 
-                            <div style={{ textAlign: "center", width: "300px" }}>
-                                <p style={{ fontStyle: "italic", fontSize: "13px", color: "#000000", margin: "0" }}>TP. Hồ Chí Minh, ngày {new Date().getDate()} tháng {new Date().getMonth() + 1} năm {new Date().getFullYear()}</p>
-                                <p style={{ fontWeight: "bold", textTransform: "uppercase", marginTop: "5px", fontSize: "13px", color: "#000000", margin: "5px 0" }}>
-                                    {systemSettings?.pdf_signer_title || "Người trích lục"}
-                                </p>
-                                <div style={{ height: "50px" }}></div>
-                                <p style={{ fontWeight: "bold", textTransform: "uppercase", fontSize: "14px", color: "#000000", margin: "0" }}>
-                                    {systemSettings?.pdf_signer_name || user?.name || "HỆ THỐNG WEBGIS"}
-                                </p>
-                            </div>
+                            {renderSignerBlock()}
                         </div>
 
                         <div style={{ paddingTop: "10px", textAlign: "center", fontSize: "9px", color: "#333", borderTop: "0.5px solid #000" }}>
-                            Cổng thông tin Địa chính GeoMaster - {systemSettings?.footer_text || "Trung tâm dữ liệu GIS"}
+                            Cổng thông tin Địa chính GeoMaster - {pdfFooterText}
                         </div>
                     </>
                 )}
@@ -318,24 +435,15 @@ const PrintTemplate: React.FC<PrintTemplateProps> = ({ parcel, user, systemSetti
                             <>
                                 <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: "auto", paddingBottom: "10px" }}>
                                     <div style={{ textAlign: "center", width: "120px" }}>
-                                        {qrCodeUrl && <img src={qrCodeUrl} alt="QR Verify" style={{ width: "70px", height: "70px", border: "1px solid #000", padding: "1px" }} />}
-                                        <p style={{ fontSize: "8px", color: "#000000", marginTop: "4px", fontStyle: "italic" }}>Quét xác thực</p>
+                                        {showQr && qrCodeUrl && <img src={qrCodeUrl} alt="QR Verify" style={{ width: "70px", height: "70px", border: "1px solid #000", padding: "1px" }} />}
+                                        {showQr && <p style={{ fontSize: "8px", color: "#000000", marginTop: "4px", fontStyle: "italic" }}>Quét xác thực</p>}
                                     </div>
 
-                                    <div style={{ textAlign: "center", width: "300px" }}>
-                                        <p style={{ fontStyle: "italic", fontSize: "13px", color: "#000000", margin: "0" }}>TP. Hồ Chí Minh, ngày {new Date().getDate()} tháng {new Date().getMonth() + 1} năm {new Date().getFullYear()}</p>
-                                        <p style={{ fontWeight: "bold", textTransform: "uppercase", marginTop: "5px", fontSize: "13px", color: "#000000", margin: "5px 0" }}>
-                                            {systemSettings?.pdf_signer_title || "Người trích lục"}
-                                        </p>
-                                        <div style={{ height: "50px" }}></div>
-                                        <p style={{ fontWeight: "bold", textTransform: "uppercase", fontSize: "14px", color: "#000000", margin: "0" }}>
-                                            {systemSettings?.pdf_signer_name || user?.name || "HỆ THỐNG WEBGIS"}
-                                        </p>
-                                    </div>
+                                    {renderSignerBlock()}
                                 </div>
 
                                 <div style={{ paddingTop: "10px", textAlign: "center", fontSize: "9px", color: "#333", borderTop: "0.5px solid #000" }}>
-                                    Cổng thông tin Địa chính GeoMaster - {systemSettings?.footer_text || "Trung tâm dữ liệu GIS"}
+                                    Cổng thông tin Địa chính GeoMaster - {pdfFooterText}
                                 </div>
                             </>
                         )}

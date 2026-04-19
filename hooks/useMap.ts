@@ -269,6 +269,20 @@ export const useMap = (
                     }
                 }
 
+                const images = Array.from(element.querySelectorAll('img')) as HTMLImageElement[];
+                await Promise.all(
+                    images.map((img) => {
+                        if (img.complete && img.naturalWidth > 0) {
+                            return Promise.resolve();
+                        }
+                        return new Promise<void>((resolve) => {
+                            const done = () => resolve();
+                            img.addEventListener('load', done, { once: true });
+                            img.addEventListener('error', done, { once: true });
+                        });
+                    })
+                );
+
                 const pdf = new jsPDF('p', 'mm', 'a4');
                 const pageWidth = pdf.internal.pageSize.getWidth();
                 const pageHeight = pdf.internal.pageSize.getHeight();
@@ -464,32 +478,42 @@ export const useMap = (
         }
     };
 
-    const initData = async () => {
+    const initData = useCallback(async () => {
         try {
             const [layers, tables, maps] = await Promise.all([
-                gisService.getLayers().catch(() => []), 
+                gisService.getLayers().catch(() => []),
                 gisService.getSpatialTables().catch(() => []),
                 gisService.getBasemaps().catch(() => [])
             ]);
-            
+
             const canRenderLayer = layerVisibilityFilter || (() => true);
             const eligibleLayers = layers.filter(canRenderLayer);
             setAvailableLayers(eligibleLayers);
-            const initialVisibleIds = eligibleLayers.filter(l => l.visible).map(l => l.id);
+
+            const initialVisibleIds = eligibleLayers.filter((l) => l.visible).map((l) => l.id);
             if (initialVisibleIds.length > 0) {
                 setVisibleLayerIds(initialVisibleIds);
-                setActiveLayerId(initialVisibleIds[0]); 
+                setActiveLayerId(initialVisibleIds[0]);
             } else if (eligibleLayers.length > 0) {
                 setVisibleLayerIds([eligibleLayers[0].id]);
                 setActiveLayerId(eligibleLayers[0].id);
+            } else {
+                setVisibleLayerIds([]);
+                setActiveLayerId(null);
             }
 
-            setSpatialTables(tables);
-            setBasemaps(maps);
-            const defMap = maps.find(m => m.isDefault) || maps[0];
-            if (defMap) setActiveBasemapId(defMap.id);
-        } catch (e) { console.error(e); } finally { setIsInitialLoading(false); }
-    };
+            setSpatialTables(Array.isArray(tables) ? tables : []);
+            setBasemaps(Array.isArray(maps) ? maps : []);
+            const defMap = Array.isArray(maps) ? (maps.find((m) => m.isDefault) || maps[0]) : null;
+            if (defMap) {
+                setActiveBasemapId(defMap.id);
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsInitialLoading(false);
+        }
+    }, [layerVisibilityFilter]);
 
     const handleClearAllLayers = () => {
         setVisibleLayerIds([]);
@@ -521,21 +545,30 @@ export const useMap = (
     }, [measureMode]);
 
     useEffect(() => {
-        if (!baseLayerRef.current || !activeBasemapId || basemaps.length === 0) return;
-        const config = basemaps.find(m => m.id === activeBasemapId);
-        if (!config) return;
-        let source;
-        if (config.type === 'OSM') {
-            source = new OSM({ crossOrigin: 'anonymous' });
-        } else {
+        if (!baseLayerRef.current) return;
+
+        const config = basemaps.find((m) => m.id === activeBasemapId);
+
+        try {
+            if (!config || !config.url || config.type === 'OSM') {
+                baseLayerRef.current.setSource(new OSM({ crossOrigin: 'anonymous' }));
+                return;
+            }
+
             let finalUrl = config.url;
             if (config.useProxy) {
                 const rawUrl = config.url.startsWith('/') ? `${API_URL}${config.url}` : config.url;
-                finalUrl = `${API_URL}/api/proxy/forward?url=${encodeURIComponent(rawUrl)}`.split('%7Bz%7D').join('{z}').split('%7Bx%7D').join('{x}').split('%7By%7D').join('{y}');
+                finalUrl = `${API_URL}/api/proxy/forward?url=${encodeURIComponent(rawUrl)}`
+                    .split('%7Bz%7D').join('{z}')
+                    .split('%7Bx%7D').join('{x}')
+                    .split('%7By%7D').join('{y}');
             }
-            source = new XYZ({ url: finalUrl, crossOrigin: 'anonymous' });
+
+            baseLayerRef.current.setSource(new XYZ({ url: finalUrl, crossOrigin: 'anonymous' }));
+        } catch (error) {
+            console.error('Basemap fallback activated:', error);
+            baseLayerRef.current.setSource(new OSM({ crossOrigin: 'anonymous' }));
         }
-        baseLayerRef.current.setSource(source);
     }, [activeBasemapId, basemaps]);
 
     useEffect(() => {

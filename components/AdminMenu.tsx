@@ -26,9 +26,9 @@ const AdminMenu: React.FC<AdminMenuProps> = ({ activeTab, onSelect, systemName, 
         { id: 'BRANCHES', icon: Building2, label: 'Chi nhánh' },
         { id: 'LOGS', icon: FileText, label: 'Nhật ký (Logs)' },
         
-        { header: 'Giao diện & Sider' },
+        { header: 'Giao diện & Điều hướng' },
         { id: 'MENU_MANAGER', icon: LayoutList, label: 'Quản lý Sidebar', highlight: true },
-        { id: 'SETTINGS', icon: Settings, label: 'Thiết lập chung' },
+        { id: 'SETTINGS', icon: Settings, label: 'Thiết lập hệ thống', highlight: true },
 
         { header: 'Nghiệp vụ Đất đai' },
         { id: 'PARCEL_MANAGER', icon: Map, label: 'Quản lý Thửa đất', highlight: true },

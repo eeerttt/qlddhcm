@@ -14,7 +14,7 @@ interface ParcelPopupProps {
 }
 
 const ParcelPopup: React.FC<ParcelPopupProps> = ({ parcel, user, onClose, onPrint, onEdit, onDelete }) => {
-    const p = parcel.properties;
+    const p = parcel.properties || {};
     const [showQR, setShowQR] = useState(false);
     const [qrDataUrl, setQrDataUrl] = useState<string>('');
 
@@ -139,17 +139,17 @@ const ParcelPopup: React.FC<ParcelPopupProps> = ({ parcel, user, onClose, onPrin
 
             {/* Actions */}
             <div className="p-3 bg-gray-50 border-t border-gray-100 grid grid-cols-2 gap-2">
-                <button 
+                <button
                     onClick={() => onPrint(parcel)}
                     className="flex items-center justify-center gap-1.5 bg-white border border-gray-200 hover:border-blue-500 hover:text-blue-600 py-2 rounded-lg text-xs font-bold transition-all text-gray-600"
                 >
                     <FileText size={14} /> Trích lục PDF
                 </button>
-                
+
                 {user && (user.role === 'ADMIN' || user.role === 'EDITOR') ? (
-                    <button 
+                    <button
                         onClick={() => onEdit && onEdit(parcel)}
-                        className="flex items-center justify-center gap-1.5 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white py-2 rounded-lg text-xs font-bold transition-all"
+                        className="flex items-center justify-center gap-1.5 bg-amber-50 text-amber-700 hover:bg-amber-500 hover:text-white py-2 rounded-lg text-xs font-bold transition-all"
                     >
                         <Edit3 size={14} /> Chỉnh sửa
                     </button>

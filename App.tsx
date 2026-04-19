@@ -154,8 +154,29 @@ const App: React.FC = () => {
               setIsSidebarCollapsed(false);
           }
       };
+      const handleSettingsUpdated = (event: Event) => {
+          const customEvent = event as CustomEvent<Record<string, string>>;
+          const nextSettings = customEvent.detail || {};
+          setSystemSettings(prev => ({ ...prev, ...nextSettings }));
+
+          if (nextSettings['system_name']) {
+              document.title = nextSettings['system_name'];
+          }
+
+          if (nextSettings['site_favicon']) {
+              const favicon = document.getElementById('favicon') as HTMLLinkElement;
+              if (favicon) {
+                  favicon.href = nextSettings['site_favicon'];
+              }
+          }
+      };
+
       window.addEventListener('resize', handleResize);
-      return () => window.removeEventListener('resize', handleResize);
+      window.addEventListener('system-settings-updated', handleSettingsUpdated as EventListener);
+      return () => {
+          window.removeEventListener('resize', handleResize);
+          window.removeEventListener('system-settings-updated', handleSettingsUpdated as EventListener);
+      };
   }, []);
 
   const handleLogin = (loggedInUser: User) => {

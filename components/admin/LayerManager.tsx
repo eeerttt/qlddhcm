@@ -54,6 +54,18 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
         return { label: 'Map chính', badge: 'bg-cyan-900/40 text-cyan-300 border-cyan-700/60' };
     };
 
+    const BASEMAP_PRESETS = [
+        { key: 'osm-standard', name: 'OpenStreetMap', type: 'OSM', url: '', useProxy: false, description: 'Nền bản đồ OSM chuẩn, nhẹ và ổn định.' },
+        { key: 'google-road', name: 'Google Road', type: 'XYZ', url: 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', useProxy: true, description: 'Bản đồ đường phố Google.' },
+        { key: 'google-satellite', name: 'Google Satellite', type: 'XYZ', url: 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', useProxy: true, description: 'Ảnh vệ tinh Google.' },
+        { key: 'google-hybrid', name: 'Google Hybrid', type: 'XYZ', url: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', useProxy: true, description: 'Ảnh vệ tinh kèm nhãn đường.' },
+        { key: 'google-terrain', name: 'Google Terrain', type: 'XYZ', url: 'https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', useProxy: true, description: 'Địa hình Google.' },
+        { key: 'carto-light', name: 'Carto Light', type: 'XYZ', url: 'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', useProxy: false, description: 'Nền sáng, sạch cho lớp chuyên đề.' },
+        { key: 'carto-dark', name: 'Carto Dark', type: 'XYZ', url: 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', useProxy: false, description: 'Nền tối phù hợp dashboard.' },
+        { key: 'esri-imagery', name: 'Esri World Imagery', type: 'XYZ', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', useProxy: false, description: 'Ảnh vệ tinh Esri.' },
+        { key: 'esri-topo', name: 'Esri Topographic', type: 'XYZ', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', useProxy: false, description: 'Bản đồ địa hình Esri.' }
+    ] as const;
+
     const [wmsLayers, setWmsLayers] = useState<WMSLayerConfig[]>([]);
     const [basemaps, setBasemaps] = useState<BasemapConfig[]>([]);
     const [spatialTables, setSpatialTables] = useState<any[]>([]);
@@ -189,8 +201,38 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                 });
             }
         } else if (type === 'BASEMAP') {
-            setFormData(item ? { ...item, description: item.description || '', sortOrder: item.sortOrder ?? 0 } : { name: '', url: '', type: 'XYZ', isDefault: false, visible: true, useProxy: false, description: '', sortOrder: 0 });
+            setFormData(item ? { ...item, description: item.description || '', sortOrder: item.sortOrder ?? 0, presetKey: item.presetKey || '' } : { name: '', url: '', type: 'XYZ', isDefault: false, visible: true, useProxy: false, description: '', sortOrder: 0, presetKey: '' });
         }
+        setIsModalOpen(true);
+    };
+
+    const applyBasemapPreset = (presetKey: string) => {
+        const preset = BASEMAP_PRESETS.find((p) => p.key === presetKey);
+        if (!preset) return;
+        setFormData((prev: any) => ({
+            ...prev,
+            presetKey,
+            name: prev?.name?.trim() ? prev.name : preset.name,
+            type: preset.type,
+            url: preset.url,
+            useProxy: preset.useProxy,
+            description: prev?.description?.trim() ? prev.description : preset.description,
+            visible: prev?.visible ?? true
+        }));
+    };
+
+    const duplicateBasemap = (bm: BasemapConfig) => {
+        setModalType('BASEMAP');
+        setIsEditMode(false);
+        setFormData({
+            ...bm,
+            id: undefined,
+            name: `${bm.name} (bản sao)`,
+            isDefault: false,
+            sortOrder: basemaps.length,
+            description: bm.description || '',
+            presetKey: ''
+        });
         setIsModalOpen(true);
     };
 
@@ -220,7 +262,22 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                 isEditMode ? await adminService.updateWmsLayer(finalData) : await adminService.addWmsLayer(finalData);
             } else if (modalType === 'BASEMAP') {
                 finalData.sortOrder = Number.isFinite(Number(finalData.sortOrder)) ? Number(finalData.sortOrder) : 0;
+                finalData.name = (finalData.name || '').trim();
                 finalData.description = (finalData.description || '').trim();
+                finalData.type = finalData.type || 'XYZ';
+                if (finalData.url) {
+                    finalData.url = finalData.url.replace(/\$\{z\}/g, '{z}').replace(/\$\{x\}/g, '{x}').replace(/\$\{y\}/g, '{y}');
+                }
+                if (!finalData.name) {
+                    throw new Error('Vui lòng nhập tên bản đồ nền.');
+                }
+                if (finalData.type !== 'OSM' && !finalData.url) {
+                    throw new Error('Vui lòng nhập URL XYZ/tiles cho bản đồ nền này.');
+                }
+                if (/google\.com|googleapis|vietbando/i.test(finalData.url || '')) {
+                    finalData.useProxy = true;
+                }
+                delete finalData.presetKey;
                 isEditMode ? await adminService.updateBasemap(finalData) : await adminService.addBasemap(finalData);
             } else if (modalType === 'TABLE') {
                 if (!finalData.tableName || !finalData.displayName) {
@@ -695,6 +752,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                                     </td>
                                     <td className="p-4">{bm.visible ? <span className="text-green-400 text-[10px] uppercase font-bold">Hiện</span> : <span className="text-gray-500 text-[10px] uppercase font-bold">Ẩn</span>}</td>
                                     <td className="p-4 flex justify-end gap-1">
+                                        <button onClick={() => duplicateBasemap(bm)} className="p-2 text-emerald-400 hover:bg-emerald-400/10 rounded transition-all" title="Nhân bản nhanh"><Plus size={16}/></button>
                                         <button onClick={() => openModal('BASEMAP', bm)} className="p-2 text-blue-400 hover:bg-blue-400/10 rounded transition-all"><Edit2 size={16}/></button>
                                         <button onClick={() => triggerConfirm('DELETE_BASEMAP', bm.id, bm.name)} className="p-2 text-red-500 hover:bg-red-500/10 rounded transition-all"><Trash2 size={16}/></button>
                                     </td>
@@ -897,6 +955,27 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                             )}
                             {modalType === 'BASEMAP' && (
                                 <>
+                                    <div className="bg-gray-900/50 p-4 rounded-xl border border-gray-700/50 space-y-3">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <label className="text-[10px] text-orange-300 font-black uppercase tracking-[0.15em]">Thư viện mẫu bản đồ nền</label>
+                                            <span className="text-[9px] text-gray-500 uppercase">OSM • Google • Esri • Carto</span>
+                                        </div>
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                            {BASEMAP_PRESETS.map((preset) => (
+                                                <button
+                                                    key={preset.key}
+                                                    type="button"
+                                                    onClick={() => applyBasemapPreset(preset.key)}
+                                                    className={`text-left rounded-lg border px-3 py-2 transition-all ${formData.presetKey === preset.key ? 'border-orange-500 bg-orange-900/20 text-white' : 'border-gray-700 bg-gray-950 text-gray-300 hover:border-orange-700'}`}
+                                                >
+                                                    <span className="block text-[10px] font-black uppercase">{preset.name}</span>
+                                                    <span className="block mt-1 text-[9px] text-gray-500">{preset.type}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                        <p className="text-[10px] text-gray-500">Chọn mẫu để tự điền nhanh URL và cấu hình, sau đó bạn vẫn có thể chỉnh tay.</p>
+                                    </div>
+
                                     <div>
                                         <label className="text-[10px] text-gray-500 font-black uppercase block mb-1.5 ml-1">Tên bản đồ nền</label>
                                         <input className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-white font-bold" value={formData.name || ''} onChange={e => setFormData({...formData, name: e.target.value})}/>
@@ -912,15 +991,16 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                                         </div>
                                     </div>
                                     <div>
-                                        <label className="text-[10px] text-gray-500 font-black uppercase block mb-1.5 ml-1">Loại</label>
-                                        <select className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-white" value={formData.type || 'XYZ'} onChange={e => setFormData({...formData, type: e.target.value})}>
-                                            <option value="XYZ">XYZ Tiles</option>
-                                            <option value="OSM">OpenStreetMap</option>
+                                        <label className="text-[10px] text-gray-500 font-black uppercase block mb-1.5 ml-1">Loại nguồn</label>
+                                        <select className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-white" value={formData.type || 'XYZ'} onChange={e => setFormData({...formData, type: e.target.value, presetKey: ''})}>
+                                            <option value="XYZ">XYZ Tiles / Satellite</option>
+                                            <option value="OSM">OpenStreetMap tích hợp</option>
                                         </select>
                                     </div>
                                     <div>
-                                        <label className="text-[10px] text-gray-500 font-black uppercase block mb-1.5 ml-1">URL (XYZ Template)</label>
-                                        <input className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-white font-mono text-xs" value={formData.url || ''} onChange={e => setFormData({...formData, url: e.target.value})} disabled={formData.type === 'OSM'}/>
+                                        <label className="text-[10px] text-gray-500 font-black uppercase block mb-1.5 ml-1">URL tile</label>
+                                        <input className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-white font-mono text-xs" value={formData.url || ''} onChange={e => setFormData({...formData, url: e.target.value, presetKey: ''})} disabled={formData.type === 'OSM'} placeholder="Ví dụ: https://server/{z}/{x}/{y}.png"/>
+                                        <p className="mt-1 text-[10px] text-gray-500">Hỗ trợ nhiều nguồn khác nhau miễn là URL theo dạng tiles với bộ tham số x, y, z.</p>
                                     </div>
                                     
                                     <div className="bg-gray-950/50 p-4 rounded-xl border border-gray-800 space-y-3">
@@ -930,7 +1010,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus }) => {
                                             </div>
                                             <div className="flex-1">
                                                 <span className="text-xs font-bold text-indigo-300 block uppercase tracking-wide">Sử dụng Proxy Server</span>
-                                                <span className="text-[9px] text-gray-500">Bật nếu bản đồ bị chặn CORS hoặc cần ẩn URL gốc (VD: Vietbando)</span>
+                                                <span className="text-[9px] text-gray-500">Nên bật với Google hoặc nguồn bị chặn CORS để thêm được nhiều bản đồ hơn.</span>
                                             </div>
                                         </label>
                                     </div>

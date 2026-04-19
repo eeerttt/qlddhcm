@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { adminService } from '../../services/mockBackend';
 import { SystemSetting } from '../../types';
 import { Settings, Save, DatabaseBackup, Download, RefreshCw, AlertTriangle, Image as ImageIcon, Trash2, Map as MapIcon, CheckCircle2, X, Info, Table, CheckSquare, Square, Check, Globe, Mail, Activity, Cpu, HardDrive, Clock, FileText, Eye, EyeOff, Upload, History, Wifi, WifiOff, Zap } from 'lucide-react';
+import { PDF_TEMPLATE_PRESETS, getPdfTemplatePreset } from '../../utils/pdfTemplatePresets';
 
 const SETTING_METADATA: Record<string, { label: string; description: string; type: 'text' | 'number' | 'boolean' | 'image' }> = {
     'system_name': { label: 'Tên hệ thống', description: 'Tên hiển thị chính trên website và tiêu đề trình duyệt', type: 'text' },
@@ -32,17 +33,73 @@ const SETTING_METADATA: Record<string, { label: string; description: string; typ
     'thematic_map_max_zoom': { label: 'HC - Zoom tối đa', description: 'Mức zoom tối đa cho trang Đơn vị hành chính', type: 'number' },
     'thematic_map_min_zoom': { label: 'HC - Zoom tối thiểu', description: 'Mức zoom tối thiểu cho trang Đơn vị hành chính', type: 'number' },
     'thematic_default_basemap_id': { label: 'HC - Bản đồ nền mặc định', description: 'ID bản đồ nền mặc định cho trang Đơn vị hành chính', type: 'text' },
-    'pdf_header_text': { label: 'Tiêu đề Header PDF', description: 'Dòng chữ in trên đầu trang PDF', type: 'text' },
-    'pdf_footer_text': { label: 'Tiêu đề Footer PDF', description: 'Dòng chữ in dưới cùng trang PDF', type: 'text' }
+    'pdf_template_preset': { label: 'Mẫu PDF mặc định', description: 'Mẫu do quản trị hệ thống chọn và áp dụng cho toàn bộ người dùng', type: 'text' },
+    'pdf_header_1': { label: 'Dòng tiêu đề 1', description: 'Ví dụ: CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM', type: 'text' },
+    'pdf_header_2': { label: 'Dòng tiêu đề 2', description: 'Ví dụ: Độc lập - Tự do - Hạnh phúc', type: 'text' },
+    'pdf_title': { label: 'Tiêu đề biểu mẫu PDF', description: 'Tên lớn của biểu mẫu khi xuất thửa đất', type: 'text' },
+    'pdf_location_text': { label: 'Địa danh ký', description: 'Ví dụ: TP. Hồ Chí Minh', type: 'text' },
+    'pdf_signer_title': { label: 'Chức danh người ký', description: 'Ví dụ: Người trích lục', type: 'text' },
+    'pdf_signer_name': { label: 'Tên người ký', description: 'Tên hiển thị ở phần cuối PDF', type: 'text' },
+    'pdf_signature_style': { label: 'Mẫu chữ ký', description: 'Chọn kiểu hiển thị khối chữ ký trên PDF', type: 'text' },
+    'pdf_signature_width': { label: 'Chiều rộng chữ ký', description: 'Chiều rộng ảnh chữ ký trong PDF, đơn vị pixel, ví dụ 160', type: 'number' },
+    'pdf_signature_height': { label: 'Chiều cao chữ ký', description: 'Chiều cao ảnh chữ ký trong PDF, đơn vị pixel, ví dụ 62', type: 'number' },
+    'pdf_signature_image': { label: 'Ảnh chữ ký', description: 'Tải lên ảnh chữ ký PNG nền trong suốt để chèn vào PDF', type: 'image' },
+    'pdf_show_signature_image': { label: 'Hiển thị ảnh chữ ký', description: 'Bật hoặc tắt ảnh chữ ký trên biểu mẫu', type: 'boolean' },
+    'pdf_stamp_image': { label: 'Ảnh mộc / con dấu', description: 'Tải lên ảnh mộc đỏ hoặc dấu xác nhận để đóng trên PDF', type: 'image' },
+    'pdf_show_stamp': { label: 'Hiển thị mộc / con dấu', description: 'Bật hoặc tắt phần mộc đỏ trên biểu mẫu', type: 'boolean' },
+    'pdf_note_text': { label: 'Ghi chú PDF', description: 'Ghi chú hoặc thông tin bổ sung hiển thị trong mẫu PDF', type: 'text' },
+    'pdf_footer_text': { label: 'Chân trang PDF', description: 'Dòng chữ in dưới cùng trang PDF', type: 'text' },
+    'pdf_show_qr': { label: 'Hiển thị mã QR', description: 'Bật hoặc tắt khối mã QR xác thực trên biểu mẫu', type: 'boolean' },
+    'pdf_show_signer': { label: 'Hiển thị khối chữ ký', description: 'Bật hoặc tắt phần ngày ký và người ký', type: 'boolean' }
 };
 
 // ─── Tab → keys mapping ──────────────────────────────────────────────────────
 const TAB_KEYS: Record<string, string[]> = {
     GENERAL: ['system_name', 'site_logo', 'site_favicon', 'maintenance_mode', 'allow_registration', 'footer_text'],
     MAP:     ['map_center_lat', 'map_center_lng', 'default_zoom', 'map_max_zoom', 'map_min_zoom', 'thematic_map_center_lat', 'thematic_map_center_lng', 'thematic_default_zoom', 'thematic_map_max_zoom', 'thematic_map_min_zoom', 'thematic_default_basemap_id'],
-    PDF:     ['pdf_header_text', 'pdf_footer_text'],
+    PDF:     ['pdf_template_preset', 'pdf_header_1', 'pdf_header_2', 'pdf_title', 'pdf_location_text', 'pdf_signer_title', 'pdf_signer_name', 'pdf_signature_style', 'pdf_signature_width', 'pdf_signature_height', 'pdf_signature_image', 'pdf_show_signature_image', 'pdf_stamp_image', 'pdf_show_stamp', 'pdf_note_text', 'pdf_footer_text', 'pdf_show_qr', 'pdf_show_signer'],
     SEO:     ['seo_title', 'seo_description', 'seo_keywords', 'seo_og_image'],
     MAIL:    ['mail_host', 'mail_port', 'mail_user', 'mail_pass', 'mail_from_email', 'mail_from_name'],
+};
+
+const SETTINGS_GROUPS = [
+    {
+        title: 'Cấu hình hệ thống',
+        items: [
+            { key: 'GENERAL', label: 'Web & bảo mật', Icon: Settings, style: 'text-blue-400 border-blue-500/40 bg-blue-950/20', desc: 'Tên hệ thống, logo, quyền truy cập và chân trang.' },
+            { key: 'MAP', label: 'Bản đồ & nền', Icon: MapIcon, style: 'text-cyan-400 border-cyan-500/40 bg-cyan-950/20', desc: 'Tâm bản đồ, zoom và nền mặc định cho từng trang.' }
+        ]
+    },
+    {
+        title: 'Nghiệp vụ đất đai',
+        items: [
+            { key: 'PDF', label: 'Tài liệu & PDF', Icon: FileText, style: 'text-orange-400 border-orange-500/40 bg-orange-950/20', desc: 'Cấu hình phần đầu và chân trang khi xuất PDF, biên bản và hồ sơ nghiệp vụ.' }
+        ]
+    },
+    {
+        title: 'Truyền thông',
+        items: [
+            { key: 'SEO', label: 'SEO & chia sẻ', Icon: Globe, style: 'text-indigo-400 border-indigo-500/40 bg-indigo-950/20', desc: 'Google, mạng xã hội và ảnh chia sẻ.' },
+            { key: 'MAIL', label: 'Mail Server', Icon: Mail, style: 'text-rose-400 border-rose-500/40 bg-rose-950/20', desc: 'SMTP, email gửi đi và kiểm tra OTP.' }
+        ]
+    },
+    {
+        title: 'Vận hành dữ liệu',
+        items: [
+            { key: 'STATUS', label: 'Máy chủ', Icon: Activity, style: 'text-emerald-400 border-emerald-500/40 bg-emerald-950/20', desc: 'Tài nguyên máy chủ và trạng thái kết nối.' },
+            { key: 'BACKUP', label: 'Sao lưu SQL', Icon: DatabaseBackup, style: 'text-green-400 border-green-500/40 bg-green-950/20', desc: 'Xuất và khôi phục dữ liệu hệ thống.' }
+        ]
+    }
+] as const;
+
+const TAB_TITLES: Record<string, { title: string; description: string }> = {
+    GENERAL: { title: 'Thiết lập hệ thống chung', description: 'Các cấu hình nền tảng của website và quyền truy cập.' },
+    MAP: { title: 'Thiết lập bản đồ', description: 'Nhóm cấu hình điều hướng, tâm bản đồ và nền mặc định.' },
+    PDF: { title: 'Nghiệp vụ đất đai - Tài liệu PDF', description: 'Nhóm cấu hình biểu mẫu, header và footer phục vụ xuất hồ sơ PDF trong nghiệp vụ đất đai.' },
+    SEO: { title: 'Thiết lập SEO', description: 'Quản lý cách website hiển thị trên Google và mạng xã hội.' },
+    MAIL: { title: 'Thiết lập Mail Server', description: 'Cấu hình SMTP và thử gửi email trực tiếp.' },
+    STATUS: { title: 'Trạng thái hệ thống', description: 'Theo dõi máy chủ và kiểm tra kết nối dịch vụ.' },
+    BACKUP: { title: 'Sao lưu và khôi phục', description: 'Xuất hoặc phục hồi dữ liệu từ tệp SQL.' }
 };
 
 // ─── Inline validation ────────────────────────────────────────────────────────
@@ -211,13 +268,24 @@ const SystemSettingsManager: React.FC = () => {
     const updateSettingValue = (key: string, value: string) => {
         const err = validate(key, value);
         setValidationErrors(prev => ({ ...prev, [key]: err }));
+
         setSettings(prev => {
-            const exists = prev.some(s => s.key === key);
-            if (exists) {
-                return prev.map(s => s.key === key ? { ...s, value } : s);
-            } else {
-                return [...prev, { key, value, type: SETTING_METADATA[key]?.type || 'text' } as SystemSetting];
+            let next = prev.some(s => s.key === key)
+                ? prev.map(s => s.key === key ? { ...s, value } : s)
+                : [...prev, { key, value, type: SETTING_METADATA[key]?.type || 'text' } as SystemSetting];
+
+            if (key === 'pdf_template_preset') {
+                const preset = getPdfTemplatePreset(value);
+                Object.entries(preset.settings).forEach(([presetKey, presetValue]) => {
+                    if (next.some(s => s.key === presetKey)) {
+                        next = next.map(s => s.key === presetKey ? { ...s, value: presetValue } : s);
+                    } else {
+                        next.push({ key: presetKey, value: presetValue, type: SETTING_METADATA[presetKey]?.type || 'text' } as SystemSetting);
+                    }
+                });
             }
+
+            return next;
         });
     };
 
@@ -228,7 +296,14 @@ const SystemSettingsManager: React.FC = () => {
         setLoading(true);
         try {
             await adminService.saveSettings(settings);
-            setSavedSettings(settings.map(s => ({ ...s }))); // update pristine
+            setSavedSettings(settings.map(s => ({ ...s })));
+
+            const settingsMap = settings.reduce((acc, item) => {
+                acc[item.key] = item.value;
+                return acc;
+            }, {} as Record<string, string>);
+
+            window.dispatchEvent(new CustomEvent('system-settings-updated', { detail: settingsMap }));
             showDialog('success', 'Đã lưu', 'Hệ thống đã ghi nhận các thay đổi cấu hình mới.');
         } catch (e: any) {
             showDialog('error', 'Lỗi lưu trữ', e.message);
@@ -303,7 +378,8 @@ const SystemSettingsManager: React.FC = () => {
     };
 
     const renderSettingInput = (key: string) => {
-        const setting = settings.find(s => s.key === key) || { key, value: '', type: SETTING_METADATA[key]?.type || 'text' };
+        const booleanDefaultValue = ['pdf_show_qr', 'pdf_show_signer', 'pdf_show_signature_image', 'pdf_show_stamp'].includes(key) ? 'true' : '';
+        const setting = settings.find(s => s.key === key) || { key, value: SETTING_METADATA[key]?.type === 'boolean' ? booleanDefaultValue : '', type: SETTING_METADATA[key]?.type || 'text' };
         const metadata = SETTING_METADATA[key];
         const dirty = isDirtyKey(key);
         const error = validationErrors[key];
@@ -357,6 +433,42 @@ const SystemSettingsManager: React.FC = () => {
                             <option key={opt.id} value={opt.id}>{opt.name} ({opt.id})</option>
                         ))}
                     </select>
+                    {dirty && <p className="text-[10px] text-yellow-500">● Chưa lưu</p>}
+                </div>
+            );
+        }
+
+        if (key === 'pdf_template_preset') {
+            return (
+                <div className="space-y-2">
+                    <select
+                        className={`w-full bg-gray-900 border rounded p-2.5 text-white outline-none font-medium transition-colors ${dirty ? 'border-yellow-500/60 focus:border-yellow-400' : 'border-gray-600 focus:border-blue-500'}`}
+                        value={setting.value || 'DEFAULT'}
+                        onChange={e => updateSettingValue(key, e.target.value)}
+                    >
+                        {Object.entries(PDF_TEMPLATE_PRESETS).map(([presetKey, preset]) => (
+                            <option key={presetKey} value={presetKey}>{preset.label}</option>
+                        ))}
+                    </select>
+                    <p className="text-[10px] text-gray-500">Quản trị hệ thống chọn mẫu tại đây, toàn bộ người dùng sẽ dùng chung khi xuất PDF.</p>
+                    {dirty && <p className="text-[10px] text-yellow-500">● Chưa lưu</p>}
+                </div>
+            );
+        }
+
+        if (key === 'pdf_signature_style') {
+            return (
+                <div className="space-y-2">
+                    <select
+                        className={`w-full bg-gray-900 border rounded p-2.5 text-white outline-none font-medium transition-colors ${dirty ? 'border-yellow-500/60 focus:border-yellow-400' : 'border-gray-600 focus:border-blue-500'}`}
+                        value={setting.value || 'HANDWRITTEN'}
+                        onChange={e => updateSettingValue(key, e.target.value)}
+                    >
+                        <option value="HANDWRITTEN">Ký tay mềm</option>
+                        <option value="FORMAL">Ký hành chính trang trọng</option>
+                        <option value="DIGITAL">Ký số màu xanh</option>
+                    </select>
+                    <p className="text-[10px] text-gray-500">Có thể kết hợp cùng ảnh chữ ký và ảnh mộc để tạo mẫu trình bày hoàn chỉnh.</p>
                     {dirty && <p className="text-[10px] text-yellow-500">● Chưa lưu</p>}
                 </div>
             );
@@ -422,32 +534,48 @@ const SystemSettingsManager: React.FC = () => {
 
     return (
         <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-6 text-white relative">
-            <div className="flex gap-2 border-b border-gray-700 pb-2 overflow-x-auto no-scrollbar scroll-smooth">
-                {([
-                    { key: 'GENERAL', label: 'Web & Bảo mật', Icon: Settings,      color: 'blue' },
-                    { key: 'MAP',     label: 'Bản đồ',         Icon: MapIcon,       color: 'cyan' },
-                    { key: 'PDF',     label: 'Xuất PDF',        Icon: FileText,      color: 'orange' },
-                    { key: 'SEO',     label: 'SEO',             Icon: Globe,         color: 'indigo' },
-                    { key: 'MAIL',    label: 'Mail Server',     Icon: Mail,          color: 'rose' },
-                    { key: 'STATUS',  label: 'Máy chủ',         Icon: Activity,      color: 'emerald' },
-                    { key: 'BACKUP',  label: 'Sao lưu SQL',     Icon: DatabaseBackup, color: 'green' },
-                ] as const).map(({ key, label, Icon, color }) => {
-                    const isActive = subTab === key;
-                    const hasDirty = dirtyTabs.includes(key);
-                    return (
-                        <button key={key} onClick={() => setSubTab(key as any)}
-                            className={`px-4 py-2 text-xs md:text-sm font-bold whitespace-nowrap border-b-2 transition-all flex items-center gap-2 relative
-                                ${isActive ? `text-${color}-400 border-${color}-400` : 'text-gray-500 border-transparent hover:text-gray-300'}`}>
-                            <Icon size={16} /> {label}
-                            {hasDirty && (
-                                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-yellow-400 rounded-full" title="Có thay đổi chưa lưu" />
-                            )}
-                        </button>
-                    );
-                })}
+            <div className="space-y-4">
+                <div>
+                    <h2 className="text-2xl font-black uppercase tracking-tight text-white">Thiết lập hệ thống</h2>
+                    <p className="text-xs text-gray-500 font-bold uppercase tracking-widest">Đã nhóm lại theo danh mục để dễ quản trị và bảo trì</p>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    {SETTINGS_GROUPS.map((group) => (
+                        <div key={group.title} className="bg-gray-900/50 border border-gray-800 rounded-2xl p-4 space-y-3">
+                            <div className="text-[10px] uppercase tracking-[0.2em] font-black text-gray-500">{group.title}</div>
+                            <div className="space-y-2">
+                                {group.items.map(({ key, label, Icon, style, desc }) => {
+                                    const isActive = subTab === key;
+                                    const hasDirty = dirtyTabs.includes(key);
+                                    return (
+                                        <button
+                                            key={key}
+                                            onClick={() => setSubTab(key as any)}
+                                            className={`w-full text-left rounded-xl border p-3 transition-all ${isActive ? style : 'border-gray-800 bg-gray-950/70 text-gray-300 hover:border-gray-700 hover:bg-gray-900'}`}
+                                        >
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="flex items-center gap-2 font-black text-xs uppercase tracking-wide">
+                                                    <Icon size={15} />
+                                                    <span>{label}</span>
+                                                </div>
+                                                {hasDirty && <span className="w-2 h-2 rounded-full bg-yellow-400 shrink-0 mt-1" title="Có thay đổi chưa lưu" />}
+                                            </div>
+                                            <div className={`mt-2 text-[11px] ${isActive ? 'text-white/80' : 'text-gray-500'}`}>{desc}</div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    ))}
+                </div>
             </div>
 
             <div className="bg-gray-800 rounded-xl md:rounded-lg p-4 md:p-6 border border-gray-700 shadow-xl min-h-[300px] md:min-h-[450px]">
+                <div className="mb-6 pb-4 border-b border-gray-700/60">
+                    <h3 className="text-lg font-black text-white uppercase tracking-tight">{TAB_TITLES[subTab]?.title || 'Thiết lập'}</h3>
+                    <p className="text-xs text-gray-500 mt-1">{TAB_TITLES[subTab]?.description || ''}</p>
+                </div>
                 {subTab === 'GENERAL' && (
                     <div className="space-y-6 animate-in fade-in duration-300">
                         {['system_name', 'site_logo', 'site_favicon', 'maintenance_mode', 'allow_registration', 'footer_text'].map(key => (
@@ -490,7 +618,7 @@ const SystemSettingsManager: React.FC = () => {
 
                 {subTab === 'PDF' && (
                     <div className="space-y-6 animate-in fade-in duration-300">
-                        {['pdf_header_text', 'pdf_footer_text'].map(key => (
+                        {['pdf_template_preset', 'pdf_header_1', 'pdf_header_2', 'pdf_title', 'pdf_location_text', 'pdf_signer_title', 'pdf_signer_name', 'pdf_signature_style', 'pdf_signature_width', 'pdf_signature_height', 'pdf_signature_image', 'pdf_show_signature_image', 'pdf_stamp_image', 'pdf_show_stamp', 'pdf_note_text', 'pdf_footer_text', 'pdf_show_qr', 'pdf_show_signer'].map(key => (
                             <div key={key} className="grid grid-cols-1 md:grid-cols-3 gap-4 border-b border-gray-700/50 pb-6 last:border-0 last:pb-0">
                                 <div className="col-span-1">
                                     <label className="text-sm font-bold text-gray-200 block mb-1">{SETTING_METADATA[key]?.label || key}</label>

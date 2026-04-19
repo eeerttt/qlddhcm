@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useCallback, useMemo } from 'react';
 import { User, WMSLayerConfig } from '../types';
-import { API_URL } from '../services/mockBackend';
 import Seo from '../components/Seo';
 
 // Hooks
@@ -14,7 +13,6 @@ import PrintTemplate from '../components/map/PrintTemplate';
 import MeasureTools from '../components/map/MeasureTools';
 import ParcelForm from '../components/admin/parcel/ParcelForm';
 import MapLegend from '../components/map/MapLegend';
-
 // Extracted Components
 import MapStatusIndicators from '../components/map/MapStatusIndicators';
 import MapInfoOverlay from '../components/map/MapInfoOverlay';
@@ -49,7 +47,6 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
     const mapPageLayerFilter = useCallback((layer: WMSLayerConfig) => isLayerVisibleInMap(layer, 'MAIN'), []);
 
     const {
-        // Refs
         mapInstance,
         highlightLayer,
         locationLayer,
@@ -105,6 +102,11 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
         [availableLayers]
     );
 
+    const mergedPrintSettings = useMemo(
+        () => ({ ...(systemSettings || {}) }),
+        [systemSettings]
+    );
+
     const mapPageLayerIdSet = useMemo(
         () => new Set(mapPageLayers.map((layer) => layer.id)),
         [mapPageLayers]
@@ -135,40 +137,36 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
         [spatialTables, mapPageSearchTableSet]
     );
 
+
     // Loại bỏ lớp hành chính khỏi MapPage để đảm bảo chỉ hiển thị ở trang riêng.
     useEffect(() => {
         setVisibleLayerIds((prev) => {
             const next = prev.filter((id) => mapPageLayerIdSet.has(id));
             return next.length === prev.length ? prev : next;
         });
-    }, [mapPageLayerIdSet, setVisibleLayerIds]);
 
-    useEffect(() => {
         if (activeLayerId && !mapPageLayerIdSet.has(activeLayerId)) {
-            const fallback = visibleLayerIds.find((id) => mapPageLayerIdSet.has(id)) || mapPageLayers[0]?.id || null;
-            setActiveLayerId(fallback);
+            setActiveLayerId(mapPageLayers[0]?.id || null);
         }
-    }, [activeLayerId, visibleLayerIds, mapPageLayerIdSet, mapPageLayers, setActiveLayerId]);
+    }, [activeLayerId, mapPageLayerIdSet, mapPageLayers, setActiveLayerId, setVisibleLayerIds]);
 
-    // Handle search coordinate result
     const handleSearchCoordinate = useCallback((lat: number, lon: number) => {
-        if (mapInstance.current && locationLayer.current) {
-            const coords = proj.fromLonLat([lon, lat]);
-            const source = locationLayer.current.getSource();
-            source?.clear();
-            const feature = new Feature(new Point(coords));
-            feature.set('type', 'search_result');
-            source?.addFeature(feature);
-            mapInstance.current.getView().animate({ 
-                center: coords, 
-                zoom: MAP_CONFIG.SEARCH_ZOOM, 
-                duration: MAP_CONFIG.ANIMATION_DURATION 
-            });
-        }
+        if (!mapInstance.current || !locationLayer.current) return;
+
+        const coords = proj.fromLonLat([lon, lat]);
+        const source = locationLayer.current.getSource();
+        source?.clear();
+
+        const pointFeature = new Feature({ geometry: new Point(coords) });
+        pointFeature.set('type', 'search_location');
+        source?.addFeature(pointFeature);
+
+        mapInstance.current.getView().animate({ center: coords, zoom: 18, duration: 900 });
     }, [mapInstance, locationLayer]);
 
     useEffect(() => {
-        if (!mapElement.current || mapInstance.current) return;
+        if (!mapElement.current) return;
+
         const initLng = parseFloat(systemSettings?.map_center_lng ?? '') || MAP_CONFIG.DEFAULT_CENTER[0];
         const initLat = parseFloat(systemSettings?.map_center_lat ?? '') || MAP_CONFIG.DEFAULT_CENTER[1];
         const initZoom = parseFloat(systemSettings?.default_zoom ?? '') || MAP_CONFIG.DEFAULT_ZOOM;
@@ -277,11 +275,19 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
 
         mapInstance.current = map;
         initData();
-        
+
         const resizeObserver = new ResizeObserver(() => map.updateSize());
         resizeObserver.observe(mapElement.current);
-        return () => resizeObserver.disconnect();
-    }, [handleSelectResult, initData]);
+
+        return () => {
+            resizeObserver.disconnect();
+            overlayInstance.current?.setPosition(undefined);
+            map.setTarget(undefined);
+            if (mapInstance.current === map) {
+                mapInstance.current = null;
+            }
+        };
+    }, [handleSelectResult, initData, baseLayerRef, highlightLayer, locationLayer, measureSource, measureModeRef, overlayInstance, systemSettings, wmsLayerGroup]);
 
     return (
         <div className="relative w-full h-full bg-slate-950 flex flex-col min-h-0 overflow-hidden font-sans">
@@ -320,7 +326,7 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
             )}
 
             <div className="fixed -left-[4000px] top-0 opacity-0 pointer-events-none overflow-hidden">
-                {printingParcel && <PrintTemplate parcel={printingParcel} user={user} systemSettings={systemSettings} />}
+                {printingParcel && <PrintTemplate parcel={printingParcel} user={user} systemSettings={mergedPrintSettings} />}
             </div>
 
             <MapControls 
@@ -351,20 +357,28 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
                 activeLayerId={activeLayerId} 
                 onToggleWMS={handleToggleWMS} 
                 onSetActiveWMS={handleActivateLayer} 
-                onOpacityChange={(id, opacity) => setAvailableLayers(prev => prev.map(l => l.id === id ? { ...l, opacity } : l))} 
+                onOpacityChange={(id, opacity) => setAvailableLayers((prev) => prev.map((layer) => layer.id === id ? { ...layer, opacity } : layer))} 
                 onClearAll={handleClearAllLayers}
             />
 
             <MapLegend isOpen={isLegendOpen} onClose={() => setIsLegendOpen(false)} />
 
-            <ParcelForm isOpen={isEditOpen} onClose={() => setIsEditOpen(false)} editingId={editFormData.gid || null} formData={editFormData} setFormData={setEditFormData} handleSubmit={handleUpdateParcel} loading={editLoading} />
+            <ParcelForm
+                isOpen={isEditOpen}
+                onClose={() => setIsEditOpen(false)}
+                editingId={editFormData.gid || null}
+                formData={editFormData}
+                setFormData={setEditFormData}
+                handleSubmit={handleUpdateParcel}
+                loading={editLoading}
+            />
 
-            <MapDialog 
-                isOpen={dialog.isOpen} 
-                type={dialog.type} 
-                title={dialog.title} 
-                message={dialog.message} 
-                onClose={() => setDialog({ ...dialog, isOpen: false })} 
+            <MapDialog
+                isOpen={dialog.isOpen}
+                type={dialog.type}
+                title={dialog.title}
+                message={dialog.message}
+                onClose={() => setDialog((prev) => ({ ...prev, isOpen: false }))}
             />
         </div>
     );
