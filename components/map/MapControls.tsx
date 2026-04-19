@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Plus, Minus, Compass, Crosshair, Loader2, Info } from 'lucide-react';
+import { Plus, Minus, Compass, Crosshair, Loader2, Info, Share2 } from 'lucide-react';
 import Map from 'ol/Map';
 
 interface MapControlsProps {
@@ -10,6 +10,7 @@ interface MapControlsProps {
     isLegendOpen?: boolean;
     onLocate: () => void;
     onToggleLegend?: () => void;
+    onShareView?: () => void;
     showLegendToggle?: boolean;
 }
 
@@ -20,10 +21,21 @@ const MapControls: React.FC<MapControlsProps> = ({
     isLegendOpen = false, 
     onLocate, 
     onToggleLegend = () => {},
+    onShareView,
     showLegendToggle = true
 }) => {
     return (
         <div className="absolute bottom-6 right-6 z-[400] flex flex-col gap-3">
+            {onShareView && (
+                <button
+                    onClick={onShareView}
+                    className="p-3.5 rounded-full shadow-2xl transition-all active:scale-90 border border-slate-200 bg-white text-emerald-600 hover:bg-emerald-50"
+                    title="Chia sẻ vị trí"
+                >
+                    <Share2 size={22} />
+                </button>
+            )}
+
             {showLegendToggle && (
                 <button 
                     onClick={onToggleLegend}

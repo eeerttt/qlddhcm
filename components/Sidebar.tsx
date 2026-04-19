@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { User, MenuItem } from '../types';
-import { LogOut, LogIn, ChevronLeft, ChevronRight, User as UserIcon, Database, HelpCircle, ExternalLink, Bell, X, Menu } from 'lucide-react';
+import { LogOut, LogIn, ChevronLeft, ChevronRight, ChevronDown, User as UserIcon, Database, HelpCircle, ExternalLink, Bell, X, Menu, FolderCog, QrCode, ArrowRightLeft } from 'lucide-react';
 import * as Icons from 'lucide-react';
 import { adminService, notificationService, API_URL } from '../services/mockBackend';
 
@@ -31,6 +31,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [dynamicMenu, setDynamicMenu] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [imgError, setImgError] = useState(false);
+  const [isToolsOpen, setIsToolsOpen] = useState(activePage === 'qr-generator' || activePage === 'coordinate-converter');
   
   // Notification badge state
   const [unreadCount, setUnreadCount] = useState(0);
@@ -38,6 +39,12 @@ const Sidebar: React.FC<SidebarProps> = ({
   useEffect(() => {
       setImgError(false);
   }, [user?.avatar]);
+
+  useEffect(() => {
+      if (activePage === 'qr-generator' || activePage === 'coordinate-converter') {
+          setIsToolsOpen(true);
+      }
+  }, [activePage]);
 
   useEffect(() => {
       const fetchMenu = async () => {
@@ -89,10 +96,16 @@ const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const visibleItems = dynamicMenu.filter(item => {
+    if (item.id === 'qr-generator' || item.id === 'coordinate-converter') return false;
     if (!user && item.id === 'notifications') return false;
     if (!user) return item.roles.includes('GUEST');
     return item.roles.includes(user.role);
   });
+
+  const toolItems = [
+    { id: 'qr-generator', label: 'Tạo mã QR', icon: QrCode, path: '/taomaqr' },
+    { id: 'coordinate-converter', label: 'Chuyển hệ tọa độ', icon: ArrowRightLeft, path: '/chuyendoihetoado' }
+  ];
 
   const handleMenuClick = (item: MenuItem) => {
       if (item.type === 'EXTERNAL' && item.url) {
@@ -239,6 +252,54 @@ const Sidebar: React.FC<SidebarProps> = ({
               </button>
             );
           })}
+
+          <div className="pt-3 mt-3 border-t border-slate-800/70">
+            <button
+              onClick={() => {
+                if (isCollapsed) {
+                  onCollapse();
+                  setIsToolsOpen(true);
+                  return;
+                }
+                setIsToolsOpen(!isToolsOpen);
+              }}
+              title={isCollapsed ? 'Tiện ích' : ''}
+              className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all group ${
+                activePage === 'qr-generator' || activePage === 'coordinate-converter'
+                  ? 'text-white bg-emerald-600/20 border border-emerald-500/30'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+              }`}
+            >
+              <div className={`${isCollapsed ? 'mx-auto' : ''} transition-transform group-hover:scale-110`}>
+                <FolderCog size={20} className={activePage === 'qr-generator' || activePage === 'coordinate-converter' ? 'text-emerald-300' : 'text-slate-400 group-hover:text-emerald-400'} />
+              </div>
+              {!isCollapsed && (
+                <div className="flex-1 flex items-center justify-between">
+                  <span className="font-bold text-xs uppercase tracking-wide">Tiện ích</span>
+                  <ChevronDown size={16} className={`transition-transform ${isToolsOpen ? 'rotate-180' : ''}`} />
+                </div>
+              )}
+            </button>
+
+            {!isCollapsed && isToolsOpen && (
+              <div className="mt-2 ml-3 space-y-1 border-l border-slate-700 pl-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                {toolItems.map((item) => {
+                  const isActive = activePage === item.id;
+                  const ToolIcon = item.icon;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => handleMenuClick({ id: item.id, label: item.label, icon: '', roles: ['GUEST', 'VIEWER', 'EDITOR', 'ADMIN'], order_index: 0, is_active: true, type: 'INTERNAL', url: item.path })}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${isActive ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'}`}
+                    >
+                      <ToolIcon size={16} className={isActive ? 'text-white' : 'text-emerald-400'} />
+                      <span className="text-[11px] font-black uppercase tracking-wide">{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
         </div>
 

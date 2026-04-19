@@ -1,13 +1,15 @@
 
 import React from 'react';
 import { X, Info } from 'lucide-react';
+import { WMSLayerConfig } from '../../types';
 
 interface MapLegendProps {
     isOpen: boolean;
     onClose: () => void;
+    visibleLayers?: WMSLayerConfig[];
 }
 
-const MapLegend: React.FC<MapLegendProps> = ({ isOpen, onClose }) => {
+const MapLegend: React.FC<MapLegendProps> = ({ isOpen, onClose, visibleLayers = [] }) => {
     const legendItems = [
         { color: '#FF0000', label: 'ONT', desc: 'Đất ở tại nông thôn' },
         { color: '#FF00FF', label: 'ODT', desc: 'Đất ở tại đô thị' },
@@ -20,6 +22,8 @@ const MapLegend: React.FC<MapLegendProps> = ({ isOpen, onClose }) => {
         { color: '#A52A2A', label: 'DGT', desc: 'Đất giao thông' },
         { color: '#FFC0CB', label: 'DGD', desc: 'Đất giáo dục và đào tạo' },
     ];
+
+    const visibleLayerItems = visibleLayers.filter(Boolean);
 
     if (!isOpen) return null;
 
@@ -34,19 +38,40 @@ const MapLegend: React.FC<MapLegendProps> = ({ isOpen, onClose }) => {
                     <X size={16} />
                 </button>
             </div>
-            <div className="p-4 max-h-64 overflow-y-auto custom-scrollbar space-y-3">
-                {legendItems.map((item, index) => (
-                    <div key={index} className="flex items-center gap-3 group">
-                        <div 
-                            className="w-4 h-4 rounded shadow-sm border border-black/10 shrink-0 group-hover:scale-110 transition-transform" 
-                            style={{ backgroundColor: item.color }}
-                        />
-                        <div className="flex flex-col">
-                            <span className="text-[10px] font-black text-slate-900">{item.label}</span>
-                            <span className="text-[9px] text-slate-500 leading-tight">{item.desc}</span>
-                        </div>
+            <div className="p-4 max-h-64 overflow-y-auto custom-scrollbar space-y-4">
+                {visibleLayerItems.length > 0 && (
+                    <div className="space-y-2 pb-3 border-b border-slate-100">
+                        <p className="text-[9px] font-black uppercase tracking-widest text-blue-600">
+                            Lớp đang bật ({visibleLayerItems.length})
+                        </p>
+                        {visibleLayerItems.map((layer) => (
+                            <div key={layer.id} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                                <div className="text-[10px] font-black text-slate-900">{layer.name}</div>
+                                <div className="text-[8px] font-bold uppercase tracking-wider text-slate-500 mt-0.5">
+                                    {layer.category === 'PLANNING' ? 'Quy hoạch' : layer.category === 'ADMINISTRATIVE' ? 'Hành chính' : 'Chuyên đề'}
+                                </div>
+                                {layer.description && (
+                                    <div className="text-[9px] text-slate-500 leading-snug mt-1">{layer.description}</div>
+                                )}
+                            </div>
+                        ))}
                     </div>
-                ))}
+                )}
+
+                <div className="space-y-3">
+                    {legendItems.map((item, index) => (
+                        <div key={index} className="flex items-center gap-3 group">
+                            <div 
+                                className="w-4 h-4 rounded shadow-sm border border-black/10 shrink-0 group-hover:scale-110 transition-transform" 
+                                style={{ backgroundColor: item.color }}
+                            />
+                            <div className="flex flex-col">
+                                <span className="text-[10px] font-black text-slate-900">{item.label}</span>
+                                <span className="text-[9px] text-slate-500 leading-tight">{item.desc}</span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
             </div>
             <div className="p-3 bg-slate-50 border-t border-slate-100 text-center">
                 <p className="text-[8px] text-slate-400 font-bold uppercase tracking-tighter">Theo Thông tư 27/2018/TT-BTNMT</p>

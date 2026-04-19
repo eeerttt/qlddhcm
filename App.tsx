@@ -16,6 +16,7 @@ const UserProfile = lazy(() => import('./pages/UserProfile'));
 const Messaging = lazy(() => import('./pages/Messaging'));
 const Notifications = lazy(() => import('./pages/Notifications.tsx'));
 const QRGenerator = lazy(() => import('./components/tools/QRGenerator'));
+const CoordinateConverter = lazy(() => import('./components/tools/CoordinateConverter'));
 const EditorPage = lazy(() => import('./pages/EditorPage'));
 const LandPriceLookup = lazy(() => import('./pages/LandPriceLookup'));
 const About = lazy(() => import('./pages/About'));
@@ -45,6 +46,7 @@ const PATH_MAPPING: Record<string, string> = {
     'messaging': '/tinnhan',
     'notifications': '/thongbao',
     'qr-generator': '/taomaqr',
+    'coordinate-converter': '/chuyendoihetoado',
     'land-price': '/giadata',
     'admin': '/quantri',
     'about': '/gioithieu'
@@ -75,7 +77,8 @@ const App: React.FC = () => {
   const currentPath = location.pathname === '/' ? '/' : `/${location.pathname.split('/')[1]}`;
   const activePage = REVERSE_PATH_MAPPING[currentPath] || 
                      (location.pathname.startsWith('/quantri') ? 'admin' : 
-                     (location.pathname.startsWith('/taomaqr') ? 'qr-generator' : 'map'));
+                     (location.pathname.startsWith('/taomaqr') ? 'qr-generator' :
+                     (location.pathname.startsWith('/chuyendoihetoado') ? 'coordinate-converter' : 'map')));
 
   const boot = async () => {
       const runId = ++bootRunIdRef.current;
@@ -261,7 +264,7 @@ const App: React.FC = () => {
   );
 
   // Render 404 toàn màn hình — trước khi vào layout sidebar
-  const KNOWN_PATHS = ['/', '/donvihanhchinh', '/giadata', '/taomaqr', '/gioithieu', '/thongke', '/chinhsuabanve', '/hoso', '/tinnhan', '/thongbao', '/quantri'];
+  const KNOWN_PATHS = ['/', '/donvihanhchinh', '/giadata', '/taomaqr', '/chuyendoihetoado', '/gioithieu', '/thongke', '/chinhsuabanve', '/hoso', '/tinnhan', '/thongbao', '/quantri'];
   const isKnownPath = KNOWN_PATHS.some(p => location.pathname === p || location.pathname.startsWith(p + '/'));
   if (!isKnownPath) return (
       <Suspense fallback={<PageLoader />}>
@@ -300,6 +303,7 @@ const App: React.FC = () => {
                 <Route path="/donvihanhchinh" element={<AdministrativeMapPage user={user} systemSettings={systemSettings} />} />
                 <Route path="/giadata" element={<LandPriceLookup />} />
                 <Route path="/taomaqr" element={<QRGenerator />} />
+                <Route path="/chuyendoihetoado" element={<CoordinateConverter />} />
                 <Route path="/gioithieu" element={<About />} />
                 
                 {/* Protected Routes */}

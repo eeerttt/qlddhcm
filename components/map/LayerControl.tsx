@@ -2,6 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { Layers, Eye, EyeOff, MapPin, MousePointerClick, Search, Map as MapIcon, Landmark, ChevronDown, ChevronUp, X, Filter, SlidersHorizontal, Sun, CheckCircle2 } from 'lucide-react';
 import { WMSLayerConfig, BasemapConfig } from '../../types';
+import { removeAccents } from '../../utils/helpers';
 
 interface LayerControlProps {
     isOpen: boolean;
@@ -29,12 +30,19 @@ const LayerControl: React.FC<LayerControlProps> = ({
     // Lọc lớp theo từ khóa tìm kiếm
     const filteredLayers = useMemo(() => {
         const layers = Array.isArray(availableLayers) ? availableLayers : [];
-        if (!searchTerm || !searchTerm.trim()) return layers;
-        const term = searchTerm.toLowerCase();
-        return layers.filter(l => 
-            (l.name || '').toLowerCase().includes(term) || 
-            (l.layers || '').toLowerCase().includes(term)
-        );
+        const normalizedTerm = removeAccents(searchTerm || '').trim();
+        if (!normalizedTerm) return layers;
+
+        return layers.filter((l) => {
+            const searchableText = removeAccents([
+                l.name || '',
+                l.layers || '',
+                l.description || '',
+                l.category || ''
+            ].join(' '));
+
+            return searchableText.includes(normalizedTerm);
+        });
     }, [availableLayers, searchTerm]);
 
     const planningLayers = useMemo(() => 

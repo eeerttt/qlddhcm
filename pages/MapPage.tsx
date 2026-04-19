@@ -41,6 +41,8 @@ import { register } from 'ol/proj/proj4';
 proj4.defs("EPSG:9210", "+proj=tmerc +lat_0=0 +lon_0=105.75 +k=0.9999 +x_0=500000 +y_0=0 +ellps=WGS84 +towgs84=-191.904,-39.303,-111.450,0,0,0,0 +units=m +no_defs");
 register(proj4);
 
+const MAP_VIEW_STORAGE_KEY = 'qlddhcm.mapPage.viewState';
+
 const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, string> }> = ({ user, systemSettings }) => {
     const mapElement = useRef<HTMLDivElement>(null);
     const popupElement = useRef<HTMLDivElement>(null);
@@ -95,7 +97,7 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
         handleActivateLayer,
         initData,
         handleClearAllLayers
-    } = useMap(user, systemSettings, mapPageLayerFilter);
+    } = useMap(user, systemSettings, mapPageLayerFilter, 'main-map');
 
     const mapPageLayers = useMemo(
         () => filterLayersByMap(availableLayers, 'MAIN'),
@@ -164,6 +166,35 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
         mapInstance.current.getView().animate({ center: coords, zoom: 18, duration: 900 });
     }, [mapInstance, locationLayer]);
 
+    const handleShareView = useCallback(async () => {
+        if (!mapInstance.current) return;
+
+        const view = mapInstance.current.getView();
+        const center = proj.toLonLat(view.getCenter() || proj.fromLonLat(MAP_CONFIG.DEFAULT_CENTER));
+        const url = new URL(window.location.href);
+        url.searchParams.set('lat', center[1].toFixed(6));
+        url.searchParams.set('lng', center[0].toFixed(6));
+        url.searchParams.set('zoom', String(Math.round(view.getZoom() || MAP_CONFIG.DEFAULT_ZOOM)));
+        url.searchParams.set('rotation', (view.getRotation() || 0).toFixed(4));
+
+        try {
+            await navigator.clipboard.writeText(url.toString());
+            setDialog({
+                isOpen: true,
+                type: 'success',
+                title: 'Đã sao chép liên kết',
+                message: 'Bạn có thể gửi liên kết này để mở đúng vị trí bản đồ hiện tại.'
+            });
+        } catch {
+            setDialog({
+                isOpen: true,
+                type: 'info',
+                title: 'Không thể sao chép tự động',
+                message: url.toString()
+            });
+        }
+    }, [mapInstance, setDialog]);
+
     useEffect(() => {
         if (!mapElement.current) return;
 
@@ -172,6 +203,26 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
         const initZoom = parseFloat(systemSettings?.default_zoom ?? '') || MAP_CONFIG.DEFAULT_ZOOM;
         const initMinZoom = parseFloat(systemSettings?.map_min_zoom ?? '') || MAP_CONFIG.MIN_ZOOM;
         const initMaxZoom = parseFloat(systemSettings?.map_max_zoom ?? '') || MAP_CONFIG.MAX_ZOOM;
+
+        const searchParams = new URLSearchParams(window.location.search);
+        const savedView = (() => {
+            try {
+                const raw = window.localStorage.getItem(MAP_VIEW_STORAGE_KEY);
+                return raw ? JSON.parse(raw) : null;
+            } catch {
+                return null;
+            }
+        })();
+
+        const paramLng = parseFloat(searchParams.get('lng') ?? '');
+        const paramLat = parseFloat(searchParams.get('lat') ?? '');
+        const paramZoom = parseFloat(searchParams.get('zoom') ?? '');
+        const paramRotation = parseFloat(searchParams.get('rotation') ?? '');
+
+        const resolvedLng = Number.isFinite(paramLng) ? paramLng : Number(savedView?.center?.[0] ?? initLng);
+        const resolvedLat = Number.isFinite(paramLat) ? paramLat : Number(savedView?.center?.[1] ?? initLat);
+        const resolvedZoom = Number.isFinite(paramZoom) ? paramZoom : Number(savedView?.zoom ?? initZoom);
+        const resolvedRotation = Number.isFinite(paramRotation) ? paramRotation : Number(savedView?.rotation ?? 0);
 
         const map = new Map({
             target: mapElement.current,
@@ -183,8 +234,9 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
                 new VectorLayer({ source: measureSource.current, zIndex: 30000, style: measureStyle }),
             ],
             view: new View({ 
-                center: proj.fromLonLat([initLng, initLat]), 
-                zoom: initZoom, 
+                center: proj.fromLonLat([resolvedLng, resolvedLat]), 
+                zoom: resolvedZoom, 
+                rotation: resolvedRotation,
                 minZoom: initMinZoom, 
                 maxZoom: initMaxZoom 
             }),
@@ -270,6 +322,21 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
             }
         });
 
+        map.on('moveend', () => {
+            const view = map.getView();
+            const center = proj.toLonLat(view.getCenter() || proj.fromLonLat([initLng, initLat]));
+
+            try {
+                window.localStorage.setItem(MAP_VIEW_STORAGE_KEY, JSON.stringify({
+                    center: [Number(center[0].toFixed(6)), Number(center[1].toFixed(6))],
+                    zoom: Number((view.getZoom() || initZoom).toFixed(2)),
+                    rotation: Number((view.getRotation() || 0).toFixed(4))
+                }));
+            } catch {
+                // Ignore browser storage errors.
+            }
+        });
+
         map.getView().on('change:rotation', () => setMapRotation(map.getView().getRotation()));
         map.getView().on('change:resolution', () => setMapZoom(map.getView().getZoom() || 0));
 
@@ -336,6 +403,7 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
                 isLegendOpen={isLegendOpen} 
                 onLocate={handleLocateUser} 
                 onToggleLegend={() => setIsLegendOpen(!isLegendOpen)} 
+                onShareView={handleShareView}
             />
 
             <SearchPanel 
@@ -361,7 +429,11 @@ const MapPage: React.FC<{ user: User | null; systemSettings?: Record<string, str
                 onClearAll={handleClearAllLayers}
             />
 
-            <MapLegend isOpen={isLegendOpen} onClose={() => setIsLegendOpen(false)} />
+            <MapLegend 
+                isOpen={isLegendOpen} 
+                onClose={() => setIsLegendOpen(false)} 
+                visibleLayers={mapPageLayers.filter((layer) => visibleLayerIds.includes(layer.id))}
+            />
 
             <ParcelForm
                 isOpen={isEditOpen}

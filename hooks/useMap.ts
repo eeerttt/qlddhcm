@@ -21,10 +21,23 @@ import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { smartMapProperties, measureStyle } from '../components/map/mapUtils';
 
+const MAP_UI_STATE_STORAGE_PREFIX = 'qlddhcm.map.ui.';
+
+const safeReadStorage = <T,>(key: string): T | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+        const raw = window.localStorage.getItem(key);
+        return raw ? JSON.parse(raw) as T : null;
+    } catch {
+        return null;
+    }
+};
+
 export const useMap = (
     user: User | null,
     systemSettings?: Record<string, string>,
-    layerVisibilityFilter?: (layer: WMSLayerConfig) => boolean
+    layerVisibilityFilter?: (layer: WMSLayerConfig) => boolean,
+    stateStorageKey?: string
 ) => {
     // Refs for Map Instance and Layers
     const mapInstance = useRef<Map | null>(null);
@@ -488,23 +501,37 @@ export const useMap = (
 
             const canRenderLayer = layerVisibilityFilter || (() => true);
             const eligibleLayers = layers.filter(canRenderLayer);
+            const storageId = stateStorageKey ? `${MAP_UI_STATE_STORAGE_PREFIX}${stateStorageKey}` : '';
+            const savedUiState = storageId
+                ? safeReadStorage<{ visibleLayerIds?: string[]; activeLayerId?: string | null; activeBasemapId?: string | null }>(storageId)
+                : null;
+
             setAvailableLayers(eligibleLayers);
 
-            const initialVisibleIds = eligibleLayers.filter((l) => l.visible).map((l) => l.id);
-            if (initialVisibleIds.length > 0) {
-                setVisibleLayerIds(initialVisibleIds);
-                setActiveLayerId(initialVisibleIds[0]);
-            } else if (eligibleLayers.length > 0) {
-                setVisibleLayerIds([eligibleLayers[0].id]);
-                setActiveLayerId(eligibleLayers[0].id);
-            } else {
-                setVisibleLayerIds([]);
-                setActiveLayerId(null);
-            }
+            const eligibleLayerIdSet = new Set(eligibleLayers.map((layer) => layer.id));
+            const persistedVisibleIds = Array.isArray(savedUiState?.visibleLayerIds)
+                ? savedUiState.visibleLayerIds.filter((id) => eligibleLayerIdSet.has(id))
+                : [];
+            const defaultVisibleIds = eligibleLayers.filter((l) => l.visible).map((l) => l.id);
+            const nextVisibleIds = persistedVisibleIds.length > 0
+                ? persistedVisibleIds
+                : defaultVisibleIds.length > 0
+                    ? defaultVisibleIds
+                    : (eligibleLayers[0] ? [eligibleLayers[0].id] : []);
+
+            setVisibleLayerIds(nextVisibleIds);
+
+            const preferredActiveLayerId = typeof savedUiState?.activeLayerId === 'string' && eligibleLayerIdSet.has(savedUiState.activeLayerId)
+                ? savedUiState.activeLayerId
+                : null;
+            setActiveLayerId(preferredActiveLayerId || nextVisibleIds[0] || eligibleLayers[0]?.id || null);
 
             setSpatialTables(Array.isArray(tables) ? tables : []);
-            setBasemaps(Array.isArray(maps) ? maps : []);
-            const defMap = Array.isArray(maps) ? (maps.find((m) => m.isDefault) || maps[0]) : null;
+
+            const nextBasemaps = Array.isArray(maps) ? maps : [];
+            setBasemaps(nextBasemaps);
+            const persistedBasemap = nextBasemaps.find((m) => m.id === savedUiState?.activeBasemapId);
+            const defMap = persistedBasemap || nextBasemaps.find((m) => m.isDefault) || nextBasemaps[0];
             if (defMap) {
                 setActiveBasemapId(defMap.id);
             }
@@ -514,6 +541,23 @@ export const useMap = (
             setIsInitialLoading(false);
         }
     }, [layerVisibilityFilter]);
+
+    useEffect(() => {
+        if (!stateStorageKey || isInitialLoading || typeof window === 'undefined') return;
+
+        try {
+            window.localStorage.setItem(
+                `${MAP_UI_STATE_STORAGE_PREFIX}${stateStorageKey}`,
+                JSON.stringify({
+                    visibleLayerIds,
+                    activeLayerId,
+                    activeBasemapId
+                })
+            );
+        } catch {
+            // Ignore browser storage errors.
+        }
+    }, [stateStorageKey, isInitialLoading, visibleLayerIds, activeLayerId, activeBasemapId]);
 
     const handleClearAllLayers = () => {
         setVisibleLayerIds([]);
