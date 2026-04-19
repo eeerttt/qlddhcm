@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { adminService } from '../../services/mockBackend';
 import { MenuItem, UserRole } from '../../types';
-import { LayoutList, Plus, Edit2, Trash2, X, Save, Info, Search, Link as LinkIcon, Globe, Monitor, Check, Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { LayoutList, Plus, Edit2, Trash2, X, Save, Info, Search, Link as LinkIcon, Globe, Monitor, Check, Loader2, AlertTriangle, CheckCircle2, GripVertical, RefreshCw } from 'lucide-react';
 import * as Icons from 'lucide-react';
 
 const MenuManager: React.FC = () => {
@@ -12,6 +12,12 @@ const MenuManager: React.FC = () => {
     const [formData, setFormData] = useState<any>({});
     const [isEditMode, setIsEditMode] = useState(false);
     const [iconSearch, setIconSearch] = useState('');
+    const [draggingMenuId, setDraggingMenuId] = useState<string | null>(null);
+    const [dragOverMenuId, setDragOverMenuId] = useState<string | null>(null);
+    const [menuSaveState, setMenuSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+    const menuSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const menuSavedHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastSyncedMenuRef = useRef<MenuItem[]>([]);
 
     // System Dialog State
     const [dialog, setDialog] = useState<{
@@ -36,12 +42,21 @@ const MenuManager: React.FC = () => {
 
     useEffect(() => { loadMenu(); }, []);
 
+    useEffect(() => {
+        return () => {
+            if (menuSaveTimerRef.current) clearTimeout(menuSaveTimerRef.current);
+            if (menuSavedHintTimerRef.current) clearTimeout(menuSavedHintTimerRef.current);
+        };
+    }, []);
+
     const loadMenu = async () => {
         setLoading(true);
         try {
             if (adminService && typeof adminService.getMenuItems === 'function') {
                 const data = await adminService.getMenuItems();
-                setMenuItems(data.sort((a, b) => a.order_index - b.order_index));
+                const sorted = [...data].sort((a, b) => a.order_index - b.order_index);
+                setMenuItems(sorted);
+                lastSyncedMenuRef.current = sorted;
             }
         } catch (e) { console.error(e); } finally { setLoading(false); }
     };
@@ -120,6 +135,59 @@ const MenuManager: React.FC = () => {
         setIsModalOpen(true);
     };
 
+    const reindexMenuOrder = (items: MenuItem[]): MenuItem[] => {
+        return items.map((item, index) => ({ ...item, order_index: index }));
+    };
+
+    const reorderMenuItemsById = (items: MenuItem[], fromId: string, toId: string): MenuItem[] => {
+        const fromIndex = items.findIndex((item) => item.id === fromId);
+        const toIndex = items.findIndex((item) => item.id === toId);
+        if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return items;
+        const next = [...items];
+        const [moved] = next.splice(fromIndex, 1);
+        next.splice(toIndex, 0, moved);
+        return next;
+    };
+
+    const persistMenuOrder = async (orderedItems: MenuItem[]) => {
+        await Promise.all(
+            orderedItems.map((item, index) =>
+                adminService.updateMenuItem({
+                    ...item,
+                    order_index: Number.isFinite(Number(item.order_index)) ? Number(item.order_index) : index
+                })
+            )
+        );
+    };
+
+    const scheduleMenuAutoSave = (orderedItems: MenuItem[]) => {
+        if (menuSaveTimerRef.current) clearTimeout(menuSaveTimerRef.current);
+        if (menuSavedHintTimerRef.current) clearTimeout(menuSavedHintTimerRef.current);
+        setMenuSaveState('saving');
+
+        menuSaveTimerRef.current = setTimeout(async () => {
+            try {
+                await persistMenuOrder(orderedItems);
+                lastSyncedMenuRef.current = orderedItems;
+                setMenuSaveState('saved');
+                menuSavedHintTimerRef.current = setTimeout(() => setMenuSaveState('idle'), 1800);
+            } catch (e: any) {
+                setMenuItems(lastSyncedMenuRef.current);
+                setMenuSaveState('error');
+                showDialog('error', 'Không thể lưu thứ tự', e.message || 'Đã có lỗi khi cập nhật vị trí Sidebar.');
+            }
+        }, 350);
+    };
+
+    const handleMenuDrop = (targetId: string) => {
+        if (!draggingMenuId || draggingMenuId === targetId || loading) return;
+        const next = reindexMenuOrder(reorderMenuItemsById(menuItems, draggingMenuId, targetId));
+        setMenuItems(next);
+        setDraggingMenuId(null);
+        setDragOverMenuId(null);
+        scheduleMenuAutoSave(next);
+    };
+
     const toggleRole = (role: string) => {
         const currentRoles = formData.roles || [];
         if (currentRoles.includes(role)) {
@@ -157,10 +225,22 @@ const MenuManager: React.FC = () => {
 
             {/* Main Table */}
             <div className="bg-gray-900/50 border border-gray-800 rounded-[2rem] shadow-2xl overflow-hidden backdrop-blur-xl">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 px-5 py-4 border-b border-gray-800 bg-gray-950/50">
+                    <div className="flex items-center gap-3 text-xs text-gray-400 font-bold uppercase tracking-wider">
+                        <GripVertical size={14} className="text-blue-400" />
+                        <span>Kéo thả để đổi vị trí menu trên Sidebar</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest">
+                        {menuSaveState === 'saving' && <span className="text-amber-400 flex items-center gap-1"><RefreshCw size={12} className="animate-spin" /> Đang tự lưu</span>}
+                        {menuSaveState === 'saved' && <span className="text-emerald-400">Đã lưu thứ tự</span>}
+                        {menuSaveState === 'error' && <span className="text-red-400">Lưu thất bại</span>}
+                    </div>
+                </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
                         <thead className="bg-gray-950/80 text-gray-500 uppercase text-[10px] tracking-[0.2em] font-black border-b border-gray-800">
                             <tr>
+                                <th className="p-5 w-12 text-center">Kéo</th>
                                 <th className="p-5 w-16 text-center">#</th>
                                 <th className="p-5">Icon</th>
                                 <th className="p-5">Nhãn hiển thị</th>
@@ -173,13 +253,31 @@ const MenuManager: React.FC = () => {
                         <tbody className="divide-y divide-gray-800 text-gray-300">
                             {menuItems.length === 0 && !loading ? (
                                 <tr>
-                                    <td colSpan={7} className="p-20 text-center text-gray-600 font-bold uppercase tracking-widest italic opacity-20">Chưa có mục menu nào</td>
+                                    <td colSpan={8} className="p-20 text-center text-gray-600 font-bold uppercase tracking-widest italic opacity-20">Chưa có mục menu nào</td>
                                 </tr>
                             ) : menuItems.map((item) => {
                                 const IconComponent = (Icons as any)[item.icon] || Icons.HelpCircle;
                                 return (
-                                    <tr key={item.id} className="hover:bg-blue-600/5 transition-colors group">
-                                        <td className="p-5 text-center font-mono text-gray-600 group-hover:text-blue-400 transition-colors">{item.order_index}</td>
+                                    <tr
+                                        key={item.id}
+                                        draggable={!loading}
+                                        onDragStart={() => setDraggingMenuId(item.id)}
+                                        onDragOver={(e) => {
+                                            if (!loading) {
+                                                e.preventDefault();
+                                                setDragOverMenuId(item.id);
+                                            }
+                                        }}
+                                        onDrop={() => handleMenuDrop(item.id)}
+                                        onDragEnd={() => { setDraggingMenuId(null); setDragOverMenuId(null); }}
+                                        className={`hover:bg-blue-600/5 transition-colors group ${!loading ? 'cursor-move' : ''} ${draggingMenuId === item.id ? 'opacity-40' : ''} ${dragOverMenuId === item.id ? 'bg-blue-900/10' : ''}`}
+                                    >
+                                        <td className="p-5 text-center text-gray-600 group-hover:text-blue-400">
+                                            <GripVertical size={16} className="mx-auto" />
+                                        </td>
+                                        <td className="p-5 text-center font-mono text-gray-600 group-hover:text-blue-400 transition-colors">
+                                            <span className="inline-flex min-w-8 justify-center px-2 py-1 rounded-lg bg-gray-800 border border-gray-700">{item.order_index}</span>
+                                        </td>
                                         <td className="p-5">
                                             <div className="w-10 h-10 bg-gray-800 rounded-xl flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform border border-gray-700">
                                                 <IconComponent size={20}/>

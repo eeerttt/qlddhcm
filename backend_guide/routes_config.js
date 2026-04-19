@@ -198,6 +198,25 @@ export default function(pool, logSystemAction) {
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
+    router.post('/menu-items/reorder', authenticateToken, requireAdmin, async (req, res) => {
+        const items = Array.isArray(req.body?.items) ? req.body.items : [];
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            for (const item of items) {
+                await client.query(`UPDATE menu_items SET order_index = $1 WHERE id = $2`, [item.order_index, item.id]);
+            }
+            await client.query('COMMIT');
+            await logSystemAction(req, 'REORDER_MENU', `Cập nhật thứ tự ${items.length} mục menu`);
+            res.json({ status: 'ok' });
+        } catch (e) {
+            await client.query('ROLLBACK');
+            res.status(500).json({ error: e.message });
+        } finally {
+            client.release();
+        }
+    });
+
     router.put('/menu-items/:id', authenticateToken, requireAdmin, async (req, res) => {
         const { id } = req.params;
         const { label, icon, roles, order_index, is_active, type, url } = req.body;

@@ -219,6 +219,7 @@ export const adminService = {
     },
     addMenuItem: async (item: MenuItem) => apiCall('/menu-items', { method: 'POST', body: JSON.stringify(item) }),
     updateMenuItem: async (item: MenuItem) => apiCall(`/menu-items/${item.id}`, { method: 'PUT', body: JSON.stringify(item) }),
+    reorderMenuItems: async (items: Array<{ id: string; order_index: number }>) => apiCall('/menu-items/reorder', { method: 'POST', body: JSON.stringify({ items }) }),
     deleteMenuItem: async (id: string) => apiCall(`/menu-items/${id}`, { method: 'DELETE' }),
     checkDbConnection: async () => apiCall('/db-check'),
     getServerInfo: async () => apiCall('/server-info'),
