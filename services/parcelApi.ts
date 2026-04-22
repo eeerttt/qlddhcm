@@ -266,6 +266,30 @@ export const parcelApi = {
             const name = (tableName || '').toLowerCase().trim();
             const res = await fetch(`${API_URL}/api/spatial-tables/${name}`, { method: 'DELETE', headers: { ...getAuthHeaders() } });
             return await handleResponse(res);
+        },
+        importGeoJsonParcels: async (payload: {
+            file: File;
+            tableName: string;
+            displayName: string;
+            description?: string;
+            mapping: Record<string, string>;
+        }) => {
+            const formData = new FormData();
+            formData.append('file', payload.file);
+            formData.append('tableName', (payload.tableName || '').toLowerCase().trim());
+            formData.append('displayName', payload.displayName || '');
+            formData.append('description', payload.description || '');
+            formData.append('mapping', JSON.stringify(payload.mapping || {}));
+
+            const headers = { ...getAuthHeaders() };
+            delete headers['Content-Type'];
+
+            const res = await fetch(`${API_URL}/api/spatial-tables/import-geojson-parcels`, {
+                method: 'POST',
+                headers,
+                body: formData
+            });
+            return await handleResponse(res);
         }
     }
 };

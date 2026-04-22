@@ -5,6 +5,7 @@ import { parcelApi } from '../../services/parcelApi';
 import { WMSLayerConfig, BasemapConfig } from '../../types';
 import { Layers, Database, Plus, Edit2, Trash2, X, Eye, EyeOff, Save, Table, Link2Off, RefreshCw, Map as MapIcon, CheckCircle2, Globe, AlertCircle, Check, ShieldAlert, Lock, Tags, Info, Sun, DatabaseZap, Search, Shield, Wrench, GripVertical } from 'lucide-react';
 import { getLayerScope, MapScope } from '../../utils/layerScope';
+import ParcelGeoJsonImportModal from './ParcelGeoJsonImportModal';
 
 interface LayerManagerProps {
     dbStatus: any;
@@ -93,6 +94,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus, permissions = [] 
     const [modalType, setModalType] = useState<'LAYER' | 'TABLE' | 'BASEMAP' | null>(null);
     const [formData, setFormData] = useState<any>({});
     const [isEditMode, setIsEditMode] = useState(false);
+    const [isGeoJsonImportOpen, setIsGeoJsonImportOpen] = useState(false);
 
     // Custom Confirmation Dialog State
     const [confirmDialog, setConfirmDialog] = useState<{
@@ -117,6 +119,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus, permissions = [] 
     const canDeleteTable = hasAnyPermission(permissions, ['DELETE_TABLES', 'MANAGE_TABLES']);
     const canSyncTable = hasAnyPermission(permissions, ['SYNC_TABLES', 'MANAGE_TABLES']);
     const canRepairTable = hasAnyPermission(permissions, ['REPAIR_TABLES', 'MANAGE_TABLES']);
+    const canImportGeoJsonParcels = hasAnyPermission(permissions, ['IMPORT_PARCELS', 'CREATE_TABLES', 'MANAGE_TABLES']);
     const canCreateLayer = hasAnyPermission(permissions, ['CREATE_LAYERS', 'MANAGE_LAYERS']);
     const canEditLayer = hasAnyPermission(permissions, ['EDIT_LAYERS', 'MANAGE_LAYERS']);
     const canDeleteLayer = hasAnyPermission(permissions, ['DELETE_LAYERS', 'MANAGE_LAYERS']);
@@ -622,9 +625,18 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus, permissions = [] 
                     <span className="font-semibold text-gray-100 flex items-center gap-2">
                         <Table size={18} className="text-green-400"/> Quản lý Bảng Dữ liệu (Registry)
                     </span>
-                    <button onClick={() => openModal('TABLE')} disabled={!canCreateTable} className="bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded text-sm font-bold flex items-center gap-1 transition-all">
-                        <Plus size={16}/> Thêm / Liên kết
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setIsGeoJsonImportOpen(true)}
+                            disabled={!canImportGeoJsonParcels}
+                            className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded text-sm font-bold flex items-center gap-1 transition-all"
+                        >
+                            <DatabaseZap size={16}/> Import GeoJSON (Thửa đất)
+                        </button>
+                        <button onClick={() => openModal('TABLE')} disabled={!canCreateTable} className="bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded text-sm font-bold flex items-center gap-1 transition-all">
+                            <Plus size={16}/> Thêm / Liên kết
+                        </button>
+                    </div>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
@@ -1097,6 +1109,12 @@ const LayerManager: React.FC<LayerManagerProps> = ({ dbStatus, permissions = [] 
                     </div>
                 </div>
             )}
+
+            <ParcelGeoJsonImportModal
+                isOpen={isGeoJsonImportOpen}
+                onClose={() => setIsGeoJsonImportOpen(false)}
+                onSuccess={loadData}
+            />
         </div>
     );
 };

@@ -235,6 +235,178 @@ export default function(pool, logSystemAction) {
         } catch (e) { await pool.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
     });
 
+    router.post('/spatial-tables/import-geojson-parcels', authenticateToken, upload.single('file'), async (req, res) => {
+        const file = req.file;
+        const rawTableName = String(req.body?.tableName || '').trim();
+        const displayName = String(req.body?.displayName || '').trim();
+        const description = String(req.body?.description || '').trim();
+        const mappingRaw = String(req.body?.mapping || '{}').trim();
+
+        if (!file) return res.status(400).json({ error: 'Vui lòng chọn file GeoJSON để nhập.' });
+        if (!rawTableName) return res.status(400).json({ error: 'Vui lòng nhập tên bảng mới.' });
+        if (!displayName) return res.status(400).json({ error: 'Vui lòng nhập tên hiển thị cho bảng.' });
+
+        const safeName = rawTableName.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+        if (!TABLE_NAME_REGEX.test(safeName)) {
+            if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+            return res.status(400).json({ error: 'Tên bảng không hợp lệ, chỉ cho phép chữ thường, số và dấu gạch dưới.' });
+        }
+
+        let mapping = {};
+        let txStarted = false;
+        try {
+            mapping = JSON.parse(mappingRaw);
+        } catch {
+            if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+            return res.status(400).json({ error: 'Cấu hình ánh xạ cột (mapping) không hợp lệ.' });
+        }
+
+        const requiredMapping = ['sodoto', 'sothua'];
+        for (const key of requiredMapping) {
+            const value = String(mapping?.[key] || '').trim();
+            if (!value) {
+                if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+                return res.status(400).json({ error: `Thiếu ánh xạ bắt buộc cho trường ${key}.` });
+            }
+        }
+
+        try {
+            const existedInRegistry = await pool.query(`SELECT 1 FROM spatial_tables_registry WHERE table_name = $1 LIMIT 1`, [safeName]);
+            if (existedInRegistry.rowCount > 0) {
+                return res.status(400).json({ error: `Bảng ${safeName} đã tồn tại trong registry.` });
+            }
+
+            const existedPhysical = await pool.query(`SELECT to_regclass($1) as exists`, [safeName]);
+            if (existedPhysical.rows?.[0]?.exists) {
+                return res.status(400).json({ error: `Bảng ${safeName} đã tồn tại trong database.` });
+            }
+
+            const raw = fs.readFileSync(file.path, 'utf8');
+            const parsed = JSON.parse(raw);
+            let features = [];
+
+            if (parsed?.type === 'FeatureCollection' && Array.isArray(parsed.features)) {
+                features = parsed.features;
+            } else if (parsed?.type === 'Feature') {
+                features = [parsed];
+            } else if (Array.isArray(parsed)) {
+                features = parsed.filter((item) => item?.type === 'Feature');
+            }
+
+            if (!Array.isArray(features) || features.length === 0) {
+                return res.status(400).json({ error: 'Không tìm thấy feature hợp lệ trong file GeoJSON.' });
+            }
+
+            const normalizedFeatures = features
+                .map((feature) => ({
+                    properties: feature?.properties || {},
+                    geometry: feature?.geometry || null
+                }))
+                .filter((feature) => feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon'));
+
+            if (normalizedFeatures.length === 0) {
+                return res.status(400).json({ error: 'File không có geometry Polygon/MultiPolygon để nạp thửa đất.' });
+            }
+
+            await pool.query('BEGIN');
+            txStarted = true;
+
+            await pool.query(`
+                CREATE TABLE IF NOT EXISTS "${safeName}" (
+                    gid SERIAL PRIMARY KEY,
+                    sodoto TEXT,
+                    sothua TEXT,
+                    tenchu TEXT,
+                    diachi TEXT,
+                    loaidat TEXT,
+                    dientich NUMERIC,
+                    image_url TEXT,
+                    geometry GEOMETRY(Geometry, 9210),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+
+            await pool.query(`CREATE INDEX IF NOT EXISTS "${safeName}_geom_idx" ON "${safeName}" USING GIST (geometry)`);
+            await pool.query(`
+                INSERT INTO spatial_tables_registry (table_name, display_name, description)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (table_name) DO UPDATE SET display_name = EXCLUDED.display_name, description = EXCLUDED.description
+            `, [safeName, displayName, description]);
+
+            const resolveValue = (props, key) => {
+                const sourceKey = String(mapping?.[key] || '').trim();
+                if (!sourceKey) return null;
+                if (props[sourceKey] !== undefined && props[sourceKey] !== null) return props[sourceKey];
+                const foundKey = Object.keys(props).find((k) => String(k).toLowerCase() === sourceKey.toLowerCase());
+                return foundKey ? props[foundKey] : null;
+            };
+
+            let inserted = 0;
+            for (const feature of normalizedFeatures) {
+                const props = feature.properties || {};
+                const sodoto = resolveValue(props, 'sodoto');
+                const sothua = resolveValue(props, 'sothua');
+
+                if (sodoto === null || sothua === null || String(sodoto).trim() === '' || String(sothua).trim() === '') {
+                    continue;
+                }
+
+                const tenchu = resolveValue(props, 'tenchu');
+                const diachi = resolveValue(props, 'diachi');
+                const loaidat = resolveValue(props, 'loaidat');
+                const dientichRaw = resolveValue(props, 'dientich');
+                const dientich = (dientichRaw === null || dientichRaw === undefined || String(dientichRaw).trim() === '')
+                    ? null
+                    : Number(String(dientichRaw).replace(',', '.'));
+
+                await pool.query(
+                    `
+                    INSERT INTO "${safeName}" (sodoto, sothua, tenchu, diachi, loaidat, dientich, geometry)
+                    VALUES (
+                        $1,
+                        $2,
+                        $3,
+                        $4,
+                        $5,
+                        $6,
+                        ST_Multi(ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON($7), 4326), 9210))
+                    )
+                    `,
+                    [
+                        String(sodoto),
+                        String(sothua),
+                        tenchu !== null && tenchu !== undefined ? String(tenchu) : null,
+                        diachi !== null && diachi !== undefined ? String(diachi) : null,
+                        loaidat !== null && loaidat !== undefined ? String(loaidat) : null,
+                        Number.isFinite(dientich) ? dientich : null,
+                        JSON.stringify(feature.geometry)
+                    ]
+                );
+                inserted += 1;
+            }
+
+            await pool.query('COMMIT');
+            txStarted = false;
+            SCHEMA_CACHE.delete(safeName);
+            await logSystemAction(req, 'IMPORT_GEOJSON_PARCELS', `Import GeoJSON vào bảng mới ${safeName} (${inserted} bản ghi)`);
+
+            res.json({
+                status: 'ok',
+                tableName: safeName,
+                inserted,
+                totalFeatures: normalizedFeatures.length
+            });
+        } catch (e) {
+            if (txStarted) {
+                await pool.query('ROLLBACK');
+            }
+            res.status(500).json({ error: e.message });
+        } finally {
+            if (file && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+        }
+    });
+
     router.post('/spatial-tables/link', authenticateToken, async (req, res) => {
         const { tableName, displayName, description } = req.body;
         try {
