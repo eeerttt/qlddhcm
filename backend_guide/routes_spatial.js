@@ -241,6 +241,8 @@ export default function(pool, logSystemAction) {
         const displayName = String(req.body?.displayName || '').trim();
         const description = String(req.body?.description || '').trim();
         const mappingRaw = String(req.body?.mapping || '{}').trim();
+        const sourceSridRaw = parseInt(String(req.body?.sourceSrid || '4326'), 10);
+        const sourceSrid = Number.isFinite(sourceSridRaw) ? sourceSridRaw : 4326;
 
         if (!file) return res.status(400).json({ error: 'Vui lòng chọn file GeoJSON để nhập.' });
         if (!rawTableName) return res.status(400).json({ error: 'Vui lòng nhập tên bảng mới.' });
@@ -253,11 +255,13 @@ export default function(pool, logSystemAction) {
         }
 
         let mapping = {};
+        const client = await pool.connect();
         let txStarted = false;
         try {
             mapping = JSON.parse(mappingRaw);
         } catch {
             if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+            client.release();
             return res.status(400).json({ error: 'Cấu hình ánh xạ cột (mapping) không hợp lệ.' });
         }
 
@@ -266,17 +270,18 @@ export default function(pool, logSystemAction) {
             const value = String(mapping?.[key] || '').trim();
             if (!value) {
                 if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+                client.release();
                 return res.status(400).json({ error: `Thiếu ánh xạ bắt buộc cho trường ${key}.` });
             }
         }
 
         try {
-            const existedInRegistry = await pool.query(`SELECT 1 FROM spatial_tables_registry WHERE table_name = $1 LIMIT 1`, [safeName]);
+            const existedInRegistry = await client.query(`SELECT 1 FROM spatial_tables_registry WHERE table_name = $1 LIMIT 1`, [safeName]);
             if (existedInRegistry.rowCount > 0) {
                 return res.status(400).json({ error: `Bảng ${safeName} đã tồn tại trong registry.` });
             }
 
-            const existedPhysical = await pool.query(`SELECT to_regclass($1) as exists`, [safeName]);
+            const existedPhysical = await client.query(`SELECT to_regclass($1) as exists`, [safeName]);
             if (existedPhysical.rows?.[0]?.exists) {
                 return res.status(400).json({ error: `Bảng ${safeName} đã tồn tại trong database.` });
             }
@@ -297,21 +302,11 @@ export default function(pool, logSystemAction) {
                 return res.status(400).json({ error: 'Không tìm thấy feature hợp lệ trong file GeoJSON.' });
             }
 
-            const normalizedFeatures = features
-                .map((feature) => ({
-                    properties: feature?.properties || {},
-                    geometry: feature?.geometry || null
-                }))
-                .filter((feature) => feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon'));
-
-            if (normalizedFeatures.length === 0) {
-                return res.status(400).json({ error: 'File không có geometry Polygon/MultiPolygon để nạp thửa đất.' });
-            }
-
-            await pool.query('BEGIN');
+            await client.query('BEGIN');
+            await client.query("SET LOCAL statement_timeout = 0");
             txStarted = true;
 
-            await pool.query(`
+            await client.query(`
                 CREATE TABLE IF NOT EXISTS "${safeName}" (
                     gid SERIAL PRIMARY KEY,
                     sodoto TEXT,
@@ -321,14 +316,14 @@ export default function(pool, logSystemAction) {
                     loaidat TEXT,
                     dientich NUMERIC,
                     image_url TEXT,
-                    geometry GEOMETRY(Geometry, 9210),
+                    geometry GEOMETRY(Geometry, ${sourceSrid}),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             `);
 
-            await pool.query(`CREATE INDEX IF NOT EXISTS "${safeName}_geom_idx" ON "${safeName}" USING GIST (geometry)`);
-            await pool.query(`
+            await client.query(`CREATE INDEX IF NOT EXISTS "${safeName}_geom_idx" ON "${safeName}" USING GIST (geometry)`);
+            await client.query(`
                 INSERT INTO spatial_tables_registry (table_name, display_name, description)
                 VALUES ($1, $2, $3)
                 ON CONFLICT (table_name) DO UPDATE SET display_name = EXCLUDED.display_name, description = EXCLUDED.description
@@ -342,11 +337,47 @@ export default function(pool, logSystemAction) {
                 return foundKey ? props[foundKey] : null;
             };
 
+            const parseGeometryValue = (value) => {
+                if (!value) return null;
+                if (typeof value === 'object' && value.type && value.coordinates) {
+                    return value;
+                }
+                if (typeof value === 'string') {
+                    try {
+                        const parsedValue = JSON.parse(value);
+                        if (parsedValue && parsedValue.type && parsedValue.coordinates) {
+                            return parsedValue;
+                        }
+                    } catch (_) {
+                        return null;
+                    }
+                }
+                return null;
+            };
+
+            const resolveGeometry = (feature, props) => {
+                const sourceKey = String(mapping?.geom || '').trim();
+                if (!sourceKey || sourceKey === '__feature_geometry__' || sourceKey.toLowerCase() === 'geometry') {
+                    return feature?.geometry || null;
+                }
+                const rawGeom = resolveValue(props, 'geom');
+                return parseGeometryValue(rawGeom);
+            };
+
             let inserted = 0;
-            for (const feature of normalizedFeatures) {
+            let totalValidFeatures = 0;
+            const rowsToInsert = [];
+            for (const feature of features) {
                 const props = feature.properties || {};
                 const sodoto = resolveValue(props, 'sodoto');
                 const sothua = resolveValue(props, 'sothua');
+                const geometry = resolveGeometry(feature, props);
+
+                if (!geometry || !['Polygon', 'MultiPolygon'].includes(String(geometry.type || ''))) {
+                    continue;
+                }
+
+                totalValidFeatures += 1;
 
                 if (sodoto === null || sothua === null || String(sodoto).trim() === '' || String(sothua).trim() === '') {
                     continue;
@@ -360,33 +391,49 @@ export default function(pool, logSystemAction) {
                     ? null
                     : Number(String(dientichRaw).replace(',', '.'));
 
-                await pool.query(
-                    `
-                    INSERT INTO "${safeName}" (sodoto, sothua, tenchu, diachi, loaidat, dientich, geometry)
-                    VALUES (
-                        $1,
-                        $2,
-                        $3,
-                        $4,
-                        $5,
-                        $6,
-                        ST_Multi(ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON($7), 4326), 9210))
-                    )
-                    `,
-                    [
-                        String(sodoto),
-                        String(sothua),
-                        tenchu !== null && tenchu !== undefined ? String(tenchu) : null,
-                        diachi !== null && diachi !== undefined ? String(diachi) : null,
-                        loaidat !== null && loaidat !== undefined ? String(loaidat) : null,
-                        Number.isFinite(dientich) ? dientich : null,
-                        JSON.stringify(feature.geometry)
-                    ]
-                );
-                inserted += 1;
+                rowsToInsert.push([
+                    String(sodoto),
+                    String(sothua),
+                    tenchu !== null && tenchu !== undefined ? String(tenchu) : null,
+                    diachi !== null && diachi !== undefined ? String(diachi) : null,
+                    loaidat !== null && loaidat !== undefined ? String(loaidat) : null,
+                    Number.isFinite(dientich) ? dientich : null,
+                    JSON.stringify(geometry)
+                ]);
             }
 
-            await pool.query('COMMIT');
+            if (totalValidFeatures === 0) {
+                throw new Error('Không tìm thấy geometry Polygon/MultiPolygon hợp lệ theo ánh xạ geom.');
+            }
+
+            const batchSize = 200;
+            for (let i = 0; i < rowsToInsert.length; i += batchSize) {
+                const batch = rowsToInsert.slice(i, i + batchSize);
+                const params = [];
+                let idx = 1;
+
+                const valuesSql = batch.map((row) => {
+                    const placeholders = [
+                        `$${idx++}`,
+                        `$${idx++}`,
+                        `$${idx++}`,
+                        `$${idx++}`,
+                        `$${idx++}`,
+                        `$${idx++}`
+                    ];
+                    const geomPlaceholder = `$${idx++}`;
+                    params.push(...row);
+                    return `(${placeholders.join(', ')}, ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(${geomPlaceholder}), ${sourceSrid})))`;
+                }).join(', ');
+
+                await client.query(
+                    `INSERT INTO "${safeName}" (sodoto, sothua, tenchu, diachi, loaidat, dientich, geometry) VALUES ${valuesSql}`,
+                    params
+                );
+                inserted += batch.length;
+            }
+
+            await client.query('COMMIT');
             txStarted = false;
             SCHEMA_CACHE.delete(safeName);
             await logSystemAction(req, 'IMPORT_GEOJSON_PARCELS', `Import GeoJSON vào bảng mới ${safeName} (${inserted} bản ghi)`);
@@ -395,14 +442,15 @@ export default function(pool, logSystemAction) {
                 status: 'ok',
                 tableName: safeName,
                 inserted,
-                totalFeatures: normalizedFeatures.length
+                totalFeatures: totalValidFeatures
             });
         } catch (e) {
             if (txStarted) {
-                await pool.query('ROLLBACK');
+                await client.query('ROLLBACK');
             }
             res.status(500).json({ error: e.message });
         } finally {
+            client.release();
             if (file && fs.existsSync(file.path)) fs.unlinkSync(file.path);
         }
     });

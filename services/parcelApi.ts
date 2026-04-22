@@ -3,6 +3,17 @@ import { LandParcel } from '../types';
 
 const PRODUCTION_API_URL = 'https://api.datdaihcm.pro';
 
+const isPrivateNetworkHost = (hostname: string) => {
+    if (/^10\./.test(hostname)) return true;
+    if (/^192\.168\./.test(hostname)) return true;
+    const match = hostname.match(/^172\.(\d+)\./);
+    if (match) {
+        const block = Number(match[1]);
+        if (block >= 16 && block <= 31) return true;
+    }
+    return false;
+};
+
 const getApiUrl = () => {
     const { hostname, origin } = window.location;
     const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
@@ -15,7 +26,7 @@ const getApiUrl = () => {
         hostname === '127.0.0.1' || 
         hostname === '0.0.0.0';
 
-    if ((isLocalhost && import.meta.env.DEV) || hostname.includes('.run.app') || hostname.includes('aistudio.google.com')) {
+    if (((isLocalhost || isPrivateNetworkHost(hostname)) && import.meta.env.DEV) || hostname.includes('.run.app') || hostname.includes('aistudio.google.com')) {
         return origin;
     }
 
@@ -272,24 +283,80 @@ export const parcelApi = {
             tableName: string;
             displayName: string;
             description?: string;
+            sourceSrid?: number;
             mapping: Record<string, string>;
+            onProgress?: (percent: number) => void;
         }) => {
             const formData = new FormData();
             formData.append('file', payload.file);
             formData.append('tableName', (payload.tableName || '').toLowerCase().trim());
             formData.append('displayName', payload.displayName || '');
             formData.append('description', payload.description || '');
+            formData.append('sourceSrid', String(payload.sourceSrid || 4326));
             formData.append('mapping', JSON.stringify(payload.mapping || {}));
 
             const headers = { ...getAuthHeaders() };
             delete headers['Content-Type'];
 
-            const res = await fetch(`${API_URL}/api/spatial-tables/import-geojson-parcels`, {
-                method: 'POST',
-                headers,
-                body: formData
+            const url = `${API_URL}/api/spatial-tables/import-geojson-parcels`;
+
+            return await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', url, true);
+
+                Object.entries(headers).forEach(([key, value]) => {
+                    if (value !== undefined && value !== null) {
+                        xhr.setRequestHeader(key, String(value));
+                    }
+                });
+
+                if (payload.onProgress) {
+                    payload.onProgress(0);
+                    xhr.upload.onprogress = (event) => {
+                        if (!event.lengthComputable) return;
+                        const percent = Math.max(0, Math.min(100, Math.round((event.loaded / event.total) * 100)));
+                        payload.onProgress?.(percent);
+                    };
+                }
+
+                xhr.onerror = () => {
+                    reject(new Error('Không thể kết nối máy chủ. Có thể bị chặn CORS hoặc mạng không ổn định.'));
+                };
+
+                xhr.onload = () => {
+                    const responseText = xhr.responseText || '';
+                    let responseData: any = null;
+                    if (responseText) {
+                        try {
+                            responseData = JSON.parse(responseText);
+                        } catch {
+                            responseData = null;
+                        }
+                    }
+
+                    if (xhr.status === 401 || xhr.status === 403) {
+                        localStorage.removeItem('geo_token');
+                        localStorage.removeItem('geo_user');
+                        window.location.reload();
+                        reject(new Error('Phiên làm việc hết hạn. Vui lòng đăng nhập lại.'));
+                        return;
+                    }
+
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        payload.onProgress?.(100);
+                        resolve(responseData || { status: 'ok' });
+                        return;
+                    }
+
+                    let message = `Lỗi API (${xhr.status})`;
+                    if (responseData && (responseData.error || responseData.message)) {
+                        message = responseData.error || responseData.message;
+                    }
+                    reject(new Error(message));
+                };
+
+                xhr.send(formData);
             });
-            return await handleResponse(res);
         }
     }
 };

@@ -13,6 +13,17 @@ const ALLOWED_HOSTS = [
     'www.qlddhcm.io.vn'
 ];
 
+const isPrivateNetworkHost = (hostname: string) => {
+    if (/^10\./.test(hostname)) return true;
+    if (/^192\.168\./.test(hostname)) return true;
+    const match = hostname.match(/^172\.(\d+)\./);
+    if (match) {
+        const block = Number(match[1]);
+        if (block >= 16 && block <= 31) return true;
+    }
+    return false;
+};
+
 const getApiUrl = () => {
     const { hostname, origin } = window.location;
     const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
@@ -33,7 +44,7 @@ const getApiUrl = () => {
                    hostname === '127.0.0.1' || 
                    hostname === '0.0.0.0';
     
-    if (isLocalhost && import.meta.env.DEV) {
+    if ((isLocalhost || isPrivateNetworkHost(hostname)) && import.meta.env.DEV) {
         return origin;
     }
 

@@ -8,7 +8,7 @@ interface ParcelGeoJsonImportModalProps {
     onSuccess: () => void;
 }
 
-type MappingKey = 'sodoto' | 'sothua' | 'tenchu' | 'diachi' | 'loaidat' | 'dientich';
+type MappingKey = 'sodoto' | 'sothua' | 'tenchu' | 'diachi' | 'loaidat' | 'dientich' | 'geom';
 
 const ALIAS_MAP: Record<MappingKey, string[]> = {
     sodoto: ['sodoto', 'so_to', 'shbando', 'sh_ban_do', 'to_ban_do', 'tobando'],
@@ -16,7 +16,8 @@ const ALIAS_MAP: Record<MappingKey, string[]> = {
     tenchu: ['tenchu', 'ten_chu', 'owner', 'owner_name', 'chusudung'],
     diachi: ['diachi', 'dia_chi', 'address', 'vitri', 'vi_tri'],
     loaidat: ['loaidat', 'loai_dat', 'kyhieumucd', 'mucdich', 'mdsd'],
-    dientich: ['dientich', 'dien_tich', 'area', 'shape_area', 'st_area']
+    dientich: ['dientich', 'dien_tich', 'area', 'shape_area', 'st_area'],
+    geom: ['geometry', 'geom', 'the_geom', 'shape', 'geojson']
 };
 
 const FIELD_LABELS: Record<MappingKey, string> = {
@@ -25,7 +26,8 @@ const FIELD_LABELS: Record<MappingKey, string> = {
     tenchu: 'Tên chủ',
     diachi: 'Địa chỉ',
     loaidat: 'Loại đất',
-    dientich: 'Diện tích'
+    dientich: 'Diện tích',
+    geom: 'Geometry (geom)'
 };
 
 const ParcelGeoJsonImportModal: React.FC<ParcelGeoJsonImportModalProps> = ({ isOpen, onClose, onSuccess }) => {
@@ -34,7 +36,9 @@ const ParcelGeoJsonImportModal: React.FC<ParcelGeoJsonImportModalProps> = ({ isO
     const [displayName, setDisplayName] = useState('');
     const [description, setDescription] = useState('');
     const [availableColumns, setAvailableColumns] = useState<string[]>([]);
+    const [sourceSrid, setSourceSrid] = useState<number>(9210);
     const [loading, setLoading] = useState(false);
+    const [uploadProgress, setUploadProgress] = useState<number | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     const [mapping, setMapping] = useState<Record<MappingKey, string>>({
@@ -43,7 +47,8 @@ const ParcelGeoJsonImportModal: React.FC<ParcelGeoJsonImportModalProps> = ({ isO
         tenchu: '',
         diachi: '',
         loaidat: '',
-        dientich: ''
+        dientich: '',
+        geom: '__feature_geometry__'
     });
 
     const sampleColumnsText = useMemo(() => {
@@ -56,6 +61,10 @@ const ParcelGeoJsonImportModal: React.FC<ParcelGeoJsonImportModalProps> = ({ isO
         const nextMapping = { ...mapping };
 
         (Object.keys(ALIAS_MAP) as MappingKey[]).forEach((key) => {
+            if (key === 'geom') {
+                nextMapping.geom = '__feature_geometry__';
+                return;
+            }
             const matchedAlias = ALIAS_MAP[key].find((alias) => lowerMap.has(alias.toLowerCase()));
             nextMapping[key] = matchedAlias ? String(lowerMap.get(matchedAlias.toLowerCase()) || '') : '';
         });
@@ -123,6 +132,7 @@ const ParcelGeoJsonImportModal: React.FC<ParcelGeoJsonImportModalProps> = ({ isO
         }
 
         setLoading(true);
+        setUploadProgress(0);
         setError(null);
 
         try {
@@ -131,7 +141,9 @@ const ParcelGeoJsonImportModal: React.FC<ParcelGeoJsonImportModalProps> = ({ isO
                 tableName,
                 displayName,
                 description,
-                mapping
+                sourceSrid,
+                mapping,
+                onProgress: (percent) => setUploadProgress(percent)
             });
             onSuccess();
             onClose();
@@ -139,6 +151,7 @@ const ParcelGeoJsonImportModal: React.FC<ParcelGeoJsonImportModalProps> = ({ isO
             setError(e.message || 'Import GeoJSON thất bại.');
         } finally {
             setLoading(false);
+            setUploadProgress(null);
         }
     };
 
@@ -192,6 +205,20 @@ const ParcelGeoJsonImportModal: React.FC<ParcelGeoJsonImportModalProps> = ({ isO
                     </div>
 
                     <div>
+                        <label className="text-[10px] text-gray-500 font-black uppercase tracking-widest block mb-1">Hệ tọa độ nguồn (SRID)</label>
+                        <select
+                            value={sourceSrid}
+                            onChange={(e) => setSourceSrid(Number(e.target.value) || 4326)}
+                            className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-sm text-white"
+                        >
+                            <option value={9210}>EPSG:9210 (VN-2000)</option>
+                            <option value={4326}>EPSG:4326 (WGS84)</option>
+                            <option value={3857}>EPSG:3857 (Web Mercator)</option>
+                        </select>
+                        <p className="text-[10px] text-gray-500 mt-1">Hệ thống sẽ giữ nguyên SRID gốc của file, không chuyển đổi tọa độ khi import.</p>
+                    </div>
+
+                    <div>
                         <label className="text-[10px] text-gray-500 font-black uppercase tracking-widest block mb-1">Mô tả</label>
                         <textarea
                             value={description}
@@ -210,6 +237,20 @@ const ParcelGeoJsonImportModal: React.FC<ParcelGeoJsonImportModalProps> = ({ isO
                             className="w-full text-sm text-gray-300"
                         />
                         <p className="text-[11px] text-gray-500">Cột nhận diện: {sampleColumnsText}</p>
+                        {loading && uploadProgress !== null && (
+                            <div className="space-y-1">
+                                <div className="flex items-center justify-between text-[11px]">
+                                    <span className="text-cyan-300 font-bold">Tiến trình tải lên</span>
+                                    <span className="text-cyan-400 font-mono font-black">{uploadProgress}%</span>
+                                </div>
+                                <div className="h-2 rounded-full bg-gray-800 overflow-hidden border border-gray-700">
+                                    <div
+                                        className="h-full bg-cyan-500 transition-all duration-200"
+                                        style={{ width: `${uploadProgress}%` }}
+                                    />
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     <div className="bg-gray-900/60 border border-gray-700 rounded-xl p-4">
@@ -235,7 +276,7 @@ const ParcelGeoJsonImportModal: React.FC<ParcelGeoJsonImportModalProps> = ({ isO
                                         onChange={(e) => setMapping((prev) => ({ ...prev, [key]: e.target.value }))}
                                         className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-xs text-white"
                                     >
-                                        <option value="">-- Không chọn --</option>
+                                        {key === 'geom' ? <option value="__feature_geometry__">geometry của Feature (mặc định)</option> : <option value="">-- Không chọn --</option>}
                                         {availableColumns.map((col) => (
                                             <option key={col} value={col}>{col}</option>
                                         ))}
@@ -259,7 +300,7 @@ const ParcelGeoJsonImportModal: React.FC<ParcelGeoJsonImportModalProps> = ({ isO
                         className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-black uppercase tracking-widest flex items-center gap-2"
                     >
                         <Upload size={16} />
-                        {loading ? 'Đang import...' : 'Import vào CSDL'}
+                        {loading ? `Đang import ${uploadProgress ?? 0}%` : 'Import vào CSDL'}
                     </button>
                 </div>
             </div>
