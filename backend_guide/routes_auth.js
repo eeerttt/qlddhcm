@@ -5,9 +5,92 @@ import nodemailer from 'nodemailer';
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from './middleware_auth.js';
 
+const CAPTCHA_TTL_MS = 2 * 60 * 1000;
+const captchaStore = new Map();
+const MAX_FAILED_ATTEMPTS = 5;
+const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+const LOCK_DURATION_MS = 10 * 60 * 1000;
+const loginAttemptStore = new Map();
+
 // Hàm tạo mã OTP 6 số
 const generateOTP = () => {
     return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+const generateCaptchaChallenge = () => {
+    const first = Math.floor(Math.random() * 9) + 1;
+    const second = Math.floor(Math.random() * 9) + 1;
+    const usePlus = Math.random() > 0.5;
+    const left = usePlus ? first : Math.max(first, second);
+    const right = usePlus ? second : Math.min(first, second);
+    const answer = usePlus ? left + right : left - right;
+    const question = `${left} ${usePlus ? '+' : '-'} ${right} = ?`;
+    const challengeId = crypto.randomUUID();
+
+    captchaStore.set(challengeId, {
+        answer: String(answer),
+        expiresAt: Date.now() + CAPTCHA_TTL_MS
+    });
+
+    return { challengeId, question };
+};
+
+const cleanupCaptchaStore = () => {
+    const now = Date.now();
+    for (const [id, value] of captchaStore.entries()) {
+        if (!value || value.expiresAt <= now) {
+            captchaStore.delete(id);
+        }
+    }
+};
+
+const cleanupLoginAttemptStore = () => {
+    const now = Date.now();
+    for (const [key, value] of loginAttemptStore.entries()) {
+        if (!value) {
+            loginAttemptStore.delete(key);
+            continue;
+        }
+        const isExpired = !value.lockedUntil && (!value.lastFailedAt || now - value.lastFailedAt > ATTEMPT_WINDOW_MS);
+        const lockExpired = value.lockedUntil && value.lockedUntil <= now;
+        if (isExpired || lockExpired) {
+            loginAttemptStore.delete(key);
+        }
+    }
+};
+
+const getClientIp = (req) => {
+    const xForwardedFor = req.headers['x-forwarded-for'];
+    if (typeof xForwardedFor === 'string' && xForwardedFor.trim()) {
+        return xForwardedFor.split(',')[0].trim();
+    }
+    return req.ip || 'unknown';
+};
+
+const getAttemptKey = (req, identity) => `${String(identity || '').toLowerCase()}|${getClientIp(req)}`;
+
+const getLockRemainingSeconds = (attemptInfo) => {
+    if (!attemptInfo?.lockedUntil) return 0;
+    return Math.max(0, Math.ceil((attemptInfo.lockedUntil - Date.now()) / 1000));
+};
+
+const recordFailedAttempt = (attemptKey) => {
+    const now = Date.now();
+    const current = loginAttemptStore.get(attemptKey);
+
+    if (!current || !current.lastFailedAt || now - current.lastFailedAt > ATTEMPT_WINDOW_MS) {
+        loginAttemptStore.set(attemptKey, { count: 1, lastFailedAt: now, lockedUntil: null });
+        return { count: 1, lockedUntil: null };
+    }
+
+    const nextCount = (current.count || 0) + 1;
+    const next = {
+        count: nextCount,
+        lastFailedAt: now,
+        lockedUntil: nextCount >= MAX_FAILED_ATTEMPTS ? now + LOCK_DURATION_MS : null
+    };
+    loginAttemptStore.set(attemptKey, next);
+    return next;
 };
 
 // Hàm lấy cấu hình mail từ DB và tạo Transporter
@@ -128,16 +211,71 @@ const getHtmlTemplate = (systemName, title, greetingName, message, code) => {
 export default function(pool, logSystemAction) {
     const router = express.Router();
 
+    // --- CAPTCHA CHALLENGE ---
+    router.get('/captcha-challenge', async (req, res) => {
+        cleanupCaptchaStore();
+        const challenge = generateCaptchaChallenge();
+        res.json({
+            challengeId: challenge.challengeId,
+            question: challenge.question,
+            expiresInSec: CAPTCHA_TTL_MS / 1000
+        });
+    });
+
     // --- LOGIN ---
     router.post('/login', async (req, res) => {
-        const { email, password } = req.body;
+        const { identifier, email, password, captchaChallengeId, captchaAnswer } = req.body;
+        const identity = (identifier || email || '').trim();
+        const submittedAnswer = String(captchaAnswer || '').trim();
+        cleanupLoginAttemptStore();
         try {
-            const result = await pool.query(`SELECT * FROM users WHERE email = $1`, [email]);
+            if (!identity) {
+                return res.status(400).json({ error: "Vui lòng nhập email hoặc tên tài khoản." });
+            }
+
+            const attemptKey = getAttemptKey(req, identity);
+            const attemptInfo = loginAttemptStore.get(attemptKey);
+            if (attemptInfo?.lockedUntil && attemptInfo.lockedUntil > Date.now()) {
+                const remainingSec = getLockRemainingSeconds(attemptInfo);
+                return res.status(429).json({ error: `Đăng nhập bị tạm khóa. Vui lòng thử lại sau ${remainingSec} giây.` });
+            }
+
+            const challenge = captchaStore.get(captchaChallengeId);
+            if (!captchaChallengeId || !challenge) {
+                recordFailedAttempt(attemptKey);
+                return res.status(400).json({ error: "CAPTCHA không hợp lệ hoặc đã hết hạn. Vui lòng thử lại." });
+            }
+
+            if (challenge.expiresAt <= Date.now()) {
+                captchaStore.delete(captchaChallengeId);
+                recordFailedAttempt(attemptKey);
+                return res.status(400).json({ error: "CAPTCHA đã hết hạn. Vui lòng tải lại mã." });
+            }
+
+            if (submittedAnswer !== challenge.answer) {
+                captchaStore.delete(captchaChallengeId);
+                recordFailedAttempt(attemptKey);
+                return res.status(400).json({ error: "Mã CAPTCHA không chính xác." });
+            }
+
+            captchaStore.delete(captchaChallengeId);
+
+            const result = await pool.query(
+                `SELECT * FROM users WHERE LOWER(email) = LOWER($1) OR LOWER(name) = LOWER($1) LIMIT 1`,
+                [identity]
+            );
             const user = result.rows[0];
 
             if (!user || user.password_hash !== password) {
-                return res.status(401).json({ error: "Email hoặc mật khẩu không đúng." });
+                const failed = recordFailedAttempt(attemptKey);
+                if (failed.lockedUntil) {
+                    const remainingSec = getLockRemainingSeconds(failed);
+                    return res.status(429).json({ error: `Bạn đã nhập sai quá nhiều lần. Khóa tạm thời ${remainingSec} giây.` });
+                }
+                return res.status(401).json({ error: "Email/Tên tài khoản hoặc mật khẩu không đúng." });
             }
+
+            loginAttemptStore.delete(attemptKey);
 
             if (user.is_verified === false) {
                 return res.status(403).json({ error: "Tài khoản chưa kích hoạt. Vui lòng kiểm tra email lấy mã xác thực." });
@@ -164,8 +302,8 @@ export default function(pool, logSystemAction) {
 
     // --- REGISTER ---
     router.post('/register', async (req, res) => {
-        const { name, email, branchId } = req.body;
-        const password = '123';
+        const { name, email, branchId, password } = req.body;
+        const accountPassword = String(password || '123');
         const code = generateOTP();
         
         try {
@@ -176,7 +314,7 @@ export default function(pool, logSystemAction) {
             await pool.query(
                 `INSERT INTO users (id, email, password_hash, name, role, branch_id, is_verified, verification_token) 
                  VALUES ($1, $2, $3, $4, 'VIEWER', $5, false, $6)`,
-                [id, email, password, name, branchId, code]
+                [id, email, accountPassword, name, branchId, code]
             );
 
             // Gửi mail async (không chặn response)
@@ -221,17 +359,26 @@ export default function(pool, logSystemAction) {
 
     // --- FORGOT PASSWORD (REQUEST OTP) ---
     router.post('/forgot-password', async (req, res) => {
-        const { email } = req.body;
+        const { identifier, email } = req.body;
+        const identity = (identifier || email || '').trim();
         try {
-            const userCheck = await pool.query(`SELECT id, name FROM users WHERE email = $1`, [email]);
-            if (userCheck.rows.length === 0) return res.status(404).json({ error: "Email không tồn tại." });
+            if (!identity) {
+                return res.status(400).json({ error: "Vui lòng nhập email hoặc tên tài khoản." });
+            }
+
+            const userCheck = await pool.query(
+                `SELECT id, name, email FROM users WHERE LOWER(email) = LOWER($1) OR LOWER(name) = LOWER($1) LIMIT 1`,
+                [identity]
+            );
+            if (userCheck.rows.length === 0) return res.status(404).json({ error: "Email hoặc tên tài khoản không tồn tại." });
             
             const userName = userCheck.rows[0].name || "Người dùng";
+            const targetEmail = userCheck.rows[0].email;
             const code = generateOTP();
             const expires = new Date(Date.now() + 15 * 60 * 1000); 
 
-            await pool.query(`DELETE FROM password_reset_tokens WHERE email = $1`, [email]);
-            await pool.query(`INSERT INTO password_reset_tokens (email, token, expires_at) VALUES ($1, $2, $3)`, [email, code, expires]);
+            await pool.query(`DELETE FROM password_reset_tokens WHERE email = $1`, [targetEmail]);
+            await pool.query(`INSERT INTO password_reset_tokens (email, token, expires_at) VALUES ($1, $2, $3)`, [targetEmail, code, expires]);
 
             (async () => {
                 const mailConfig = await createDynamicTransporter(pool);
@@ -245,7 +392,7 @@ export default function(pool, logSystemAction) {
                     );
                     await mailConfig.transporter.sendMail({
                         from: mailConfig.from,
-                        to: email,
+                        to: targetEmail,
                         subject: `[${code}] Mã xác thực khôi phục mật khẩu`,
                         html: htmlContent
                     });
@@ -258,13 +405,27 @@ export default function(pool, logSystemAction) {
 
     // --- RESET PASSWORD (SUBMIT OTP) ---
     router.post('/reset-password', async (req, res) => {
-        const { email, code, newPassword } = req.body;
+        const { email, identifier, code, newPassword } = req.body;
+        const identity = (identifier || email || '').trim();
         try {
-            const tokenRes = await pool.query(`SELECT * FROM password_reset_tokens WHERE email = $1 AND token = $2 AND expires_at > NOW()`, [email, code]);
+            if (!identity) {
+                return res.status(400).json({ error: "Vui lòng nhập email hoặc tên tài khoản." });
+            }
+
+            const userRes = await pool.query(
+                `SELECT email FROM users WHERE LOWER(email) = LOWER($1) OR LOWER(name) = LOWER($1) LIMIT 1`,
+                [identity]
+            );
+            if (userRes.rows.length === 0) {
+                return res.status(404).json({ error: "Tài khoản không tồn tại." });
+            }
+
+            const targetEmail = userRes.rows[0].email;
+            const tokenRes = await pool.query(`SELECT * FROM password_reset_tokens WHERE email = $1 AND token = $2 AND expires_at > NOW()`, [targetEmail, code]);
             if (tokenRes.rows.length === 0) return res.status(400).json({ error: "Mã OTP sai hoặc đã hết hạn." });
 
-            await pool.query(`UPDATE users SET password_hash = $1 WHERE email = $2`, [newPassword, email]);
-            await pool.query(`DELETE FROM password_reset_tokens WHERE email = $1`, [email]);
+            await pool.query(`UPDATE users SET password_hash = $1 WHERE email = $2`, [newPassword, targetEmail]);
+            await pool.query(`DELETE FROM password_reset_tokens WHERE email = $1`, [targetEmail]);
             res.json({ status: 'ok' });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });

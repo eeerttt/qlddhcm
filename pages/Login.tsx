@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { authService, API_URL } from '../services/mockBackend';
 import { User, Branch } from '../types';
-import { Lock, Mail, Loader2, KeyRound, ArrowLeft, UserPlus, Building, User as UserIcon, CheckCircle, ShieldCheck, Info, CheckCircle2, AlertTriangle, Hash, Eye, EyeOff, Sun, Moon, Zap, Shield, Check } from 'lucide-react';
+import { Lock, Mail, Loader2, KeyRound, ArrowLeft, UserPlus, Building, User as UserIcon, CheckCircle, ShieldCheck, Info, CheckCircle2, AlertTriangle, Hash, Eye, EyeOff, Sun, Moon, Zap, Shield, Check, RefreshCw } from 'lucide-react';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -40,6 +40,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [captchaQuestion, setCaptchaQuestion] = useState('');
+  const [captchaChallengeId, setCaptchaChallengeId] = useState('');
+  const [captchaInput, setCaptchaInput] = useState('');
 
   // OTP State
   const [otpCode, setOtpCode] = useState('');
@@ -58,6 +61,17 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
   const [showRegPassword, setShowRegPassword] = useState(false);
   const [showRegConfirmPassword, setShowRegConfirmPassword] = useState(false);
 
+  const loadCaptchaChallenge = async () => {
+    try {
+      const data = await authService.getCaptchaChallenge();
+      setCaptchaQuestion(data.question);
+      setCaptchaChallengeId(data.challengeId);
+    } catch {
+      setCaptchaQuestion('Không tải được CAPTCHA. Vui lòng thử lại.');
+      setCaptchaChallengeId('');
+    }
+  };
+
   useEffect(() => {
     if (view === 'REGISTER') {
         const loadBranches = async () => {
@@ -74,6 +88,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
             setEmailOrUsername(remembered);
             setRememberMe(true);
         }
+      setCaptchaInput('');
+      loadCaptchaChallenge();
     }
   }, [view]);
 
@@ -100,11 +116,18 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     setError('');
+
+    if (!captchaChallengeId || !captchaInput.trim()) {
+      setError('Vui lòng nhập CAPTCHA hợp lệ trước khi đăng nhập.');
+      setCaptchaInput('');
+      return;
+    }
+
+    setLoading(true);
     try {
       // Support both email and username login
-      const user = await authService.login(emailOrUsername, password);
+      const user = await authService.login(emailOrUsername, password, captchaChallengeId, captchaInput.trim());
       if (rememberMe) {
         localStorage.setItem('rememberedLogin', emailOrUsername);
       } else {
@@ -114,6 +137,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
     } catch (err: any) {
       setError(err.message || 'Email/Tên tài khoản hoặc mật khẩu không đúng');
       showDialog('error', 'Đăng nhập thất bại', err.message || 'Email/Tên tài khoản hoặc mật khẩu không đúng');
+      loadCaptchaChallenge();
+      setCaptchaInput('');
     } finally {
       setLoading(false);
     }
@@ -130,7 +155,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
           if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(regPassword)) {
               throw new Error('Mật khẩu phải chứa chữ hoa, chữ thường và số');
           }
-          await authService.register(regName, regEmail, regBranch);
+            await authService.register(regName, regEmail, regBranch, regPassword);
           setOtpCode(''); // Reset OTP input
           setView('VERIFY_REG_OTP'); // Chuyển sang màn hình nhập OTP
       } catch (err: any) {
@@ -204,7 +229,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
       const res = await fetch(`${API_URL}/api/auth/reset-password`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: emailOrUsername, code: otpCode, newPassword })
+          body: JSON.stringify({ identifier: emailOrUsername, code: otpCode, newPassword })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Đặt lại mật khẩu thất bại");
@@ -359,6 +384,48 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
               }`}>
                 Quên mật khẩu?
               </button>
+            </div>
+
+            <div>
+              <label className={`block text-sm mb-2 uppercase font-black tracking-widest text-[11px] ${
+                theme === 'dark' ? 'text-gray-400' : 'text-gray-700'
+              }`}>CAPTCHA Bảo Mật</label>
+              <div className="grid grid-cols-[1fr_auto] gap-2 mb-2">
+                <div className={`rounded-lg px-3 py-2.5 text-center font-mono font-black tracking-[0.15em] ${
+                  theme === 'dark'
+                    ? 'bg-gray-800 border border-gray-600 text-cyan-300'
+                    : 'bg-blue-50 border border-blue-200 text-blue-700'
+                }`}>
+                  {captchaQuestion}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    loadCaptchaChallenge();
+                    setCaptchaInput('');
+                  }}
+                  className={`rounded-lg px-3 transition-colors ${
+                    theme === 'dark'
+                      ? 'bg-gray-800 border border-gray-600 text-gray-300 hover:text-white hover:border-blue-500'
+                      : 'bg-white border border-gray-300 text-gray-600 hover:text-black hover:border-blue-400'
+                  }`}
+                  aria-label="Làm mới CAPTCHA"
+                >
+                  <RefreshCw size={16} />
+                </button>
+              </div>
+              <input
+                type="text"
+                value={captchaInput}
+                onChange={(e) => setCaptchaInput(e.target.value.replace(/[^0-9]/g, '').slice(0, 3))}
+                className={`w-full rounded-lg p-3 text-sm font-medium transition-all duration-200 ${
+                  theme === 'dark'
+                    ? 'bg-gray-800 border border-gray-600 text-white focus:outline-none focus:border-cyan-500 focus:shadow-lg focus:shadow-cyan-500/20'
+                    : 'bg-gray-50 border border-gray-300 text-black focus:outline-none focus:border-cyan-500 focus:shadow-lg focus:shadow-cyan-500/10'
+                }`}
+                required
+                placeholder="Nhập kết quả CAPTCHA"
+              />
             </div>
             
             <button

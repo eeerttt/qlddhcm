@@ -466,8 +466,14 @@ export const hasAnyPermission = (permissions: string[] = [], required: string | 
 
 export const authService = {
     // Sửa lại hàm login để lưu token
-    login: async (email: string, pass: string): Promise<User> => {
-        const response = await apiCall('/auth/login', { method: 'POST', body: JSON.stringify({ email, password: pass }) });
+    getCaptchaChallenge: async (): Promise<{ challengeId: string; question: string; expiresInSec: number }> => {
+        return apiCall('/auth/captcha-challenge');
+    },
+    login: async (identifier: string, pass: string, captchaChallengeId: string, captchaAnswer: string): Promise<User> => {
+        const response = await apiCall('/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ identifier, password: pass, captchaChallengeId, captchaAnswer })
+        });
         if (response.token) {
             localStorage.setItem('geo_token', response.token);
         }
@@ -480,8 +486,8 @@ export const authService = {
         } catch { return []; } 
     },
     getProfile: async (id: string): Promise<User> => apiCall(`/users/${id}`),
-    register: async (name: string, email: string, branchId: string): Promise<any> => apiCall('/auth/register', { method: 'POST', body: JSON.stringify({ name, email, branchId }) }),
-    forgotPassword: async (email: string): Promise<any> => apiCall('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
+    register: async (name: string, email: string, branchId: string, password?: string): Promise<any> => apiCall('/auth/register', { method: 'POST', body: JSON.stringify({ name, email, branchId, password }) }),
+    forgotPassword: async (identifier: string): Promise<any> => apiCall('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ identifier }) }),
     resetPassword: async (token: string, newPassword: string): Promise<any> => apiCall('/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, newPassword }) }),
     verifyEmail: async (token: string): Promise<any> => apiCall('/auth/verify-email', { method: 'POST', body: JSON.stringify({ token }) }),
     updateProfile: async (id: string, name: string, file: File | null): Promise<any> => {
