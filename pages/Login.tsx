@@ -41,6 +41,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [captchaQuestion, setCaptchaQuestion] = useState('');
+  const [captchaImageUrl, setCaptchaImageUrl] = useState('');
+  const [captchaCodeLength, setCaptchaCodeLength] = useState(5);
   const [captchaChallengeId, setCaptchaChallengeId] = useState('');
   const [captchaInput, setCaptchaInput] = useState('');
 
@@ -61,14 +63,25 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
   const [showRegPassword, setShowRegPassword] = useState(false);
   const [showRegConfirmPassword, setShowRegConfirmPassword] = useState(false);
 
-  const loadCaptchaChallenge = async () => {
+  const loadCaptchaChallenge = async (useRefresh = false) => {
     try {
-      const data = await authService.getCaptchaChallenge();
+      const data = useRefresh
+        ? await authService.refreshCaptcha()
+        : await authService.getCaptchaChallenge();
       setCaptchaQuestion(data.question);
+      setCaptchaImageUrl(data.imageDataUrl || '');
+      setCaptchaCodeLength(Number(data.codeLength) > 0 ? Number(data.codeLength) : 5);
       setCaptchaChallengeId(data.challengeId);
-    } catch {
+      if (useRefresh) {
+        setError('');
+      }
+    } catch (err: any) {
       setCaptchaQuestion('Không tải được CAPTCHA. Vui lòng thử lại.');
+      setCaptchaImageUrl('');
       setCaptchaChallengeId('');
+      if (useRefresh) {
+        setError(err?.message || 'Bạn đang làm mới CAPTCHA quá nhanh. Vui lòng thử lại sau.');
+      }
     }
   };
 
@@ -126,8 +139,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
 
     setLoading(true);
     try {
-      // Support both email and username login
-      const user = await authService.login(emailOrUsername, password, captchaChallengeId, captchaInput.trim());
+      // Verify CAPTCHA first, then use short-lived verification token for login
+      const verifyResult = await authService.verifyCaptcha(captchaChallengeId, captchaInput.trim());
+      const user = await authService.login(emailOrUsername, password, verifyResult.captchaVerificationToken);
       if (rememberMe) {
         localStorage.setItem('rememberedLogin', emailOrUsername);
       } else {
@@ -250,12 +264,12 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
       theme === 'dark' 
         ? 'bg-gradient-to-br from-slate-950 via-blue-900 to-slate-950 backdrop-blur-sm' 
         : 'bg-gradient-to-br from-blue-50 via-white to-blue-100 backdrop-blur-sm'
-    } flex items-center justify-center p-4`}>
+    } flex items-start sm:items-center justify-center p-3 sm:p-4 overflow-y-auto`}>
       
       {/* Theme Toggle Button */}
       <button 
         onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-        className={`absolute top-6 right-6 z-50 p-3 rounded-full transition-all duration-300 ${
+        className={`absolute top-3 right-3 sm:top-6 sm:right-6 z-50 p-2.5 sm:p-3 rounded-full transition-all duration-300 ${
           theme === 'dark'
             ? 'bg-gray-800 hover:bg-gray-700 text-yellow-400'
             : 'bg-white hover:bg-gray-100 text-orange-500 shadow-lg'
@@ -268,24 +282,24 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
         theme === 'dark'
           ? 'bg-gray-900 border border-gray-700'
           : 'bg-white border border-blue-200 shadow-2xl'
-      } rounded-2xl shadow-2xl p-8 w-full max-w-md relative animate-in zoom-in-95 duration-300`}>
+      } rounded-xl sm:rounded-2xl shadow-2xl p-4 sm:p-8 w-full max-w-md max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] overflow-y-auto relative animate-in zoom-in-95 duration-300`}>
         
         <button 
             onClick={onCancel}
-            className={`absolute top-4 left-4 ${
+            className={`absolute top-3 left-3 sm:top-4 sm:left-4 ${
               theme === 'dark' ? 'text-gray-500 hover:text-white' : 'text-gray-600 hover:text-black'
             } transition-colors flex items-center gap-1 text-sm font-bold`}
         >
             <ArrowLeft size={16} /> Đóng
         </button>
 
-        <div className="text-center mb-8">
+        <div className="text-center mb-5 sm:mb-8">
           {logoUrl ? (
-              <img src={logoUrl} alt="Logo" className="mx-auto h-24 mb-4 object-contain drop-shadow-lg" />
+              <img src={logoUrl} alt="Logo" className="mx-auto h-20 sm:h-24 mb-3 sm:mb-4 object-contain drop-shadow-lg" />
           ) : null}
           <div className="flex items-center justify-center gap-2 mb-2">
             <Zap className={theme === 'dark' ? 'text-blue-400' : 'text-blue-600'} size={28} />
-            <h2 className={`text-3xl font-black ${
+            <h2 className={`text-2xl sm:text-3xl font-black ${
               theme === 'dark' ? 'text-blue-400' : 'text-blue-600'
             }`}>{systemName || 'GeoMaster'}</h2>
           </div>
@@ -309,7 +323,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
 
         {/* --- VIEW: LOGIN --- */}
         {view === 'LOGIN' && (
-          <form onSubmit={handleLogin} className="space-y-5 animate-in fade-in duration-300">
+          <form onSubmit={handleLogin} className="space-y-4 sm:space-y-5 animate-in fade-in duration-300">
             <div>
               <label className={`block text-sm mb-2 uppercase font-black tracking-widest text-[11px] ${
                 theme === 'dark' ? 'text-gray-400' : 'text-gray-700'
@@ -365,7 +379,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
               </div>
             </div>
 
-            <div className="flex items-center justify-between pt-2">
+            <div className="flex items-center justify-between pt-1 sm:pt-2">
               <label className={`flex items-center gap-2 cursor-pointer text-sm font-medium ${
                 theme === 'dark' ? 'text-gray-400 hover:text-white' : 'text-gray-700 hover:text-black'
               } transition-colors`}>
@@ -386,22 +400,33 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
               </button>
             </div>
 
+
             <div>
               <label className={`block text-sm mb-2 uppercase font-black tracking-widest text-[11px] ${
                 theme === 'dark' ? 'text-gray-400' : 'text-gray-700'
               }`}>CAPTCHA Bảo Mật</label>
               <div className="grid grid-cols-[1fr_auto] gap-2 mb-2">
-                <div className={`rounded-lg px-3 py-2.5 text-center font-mono font-black tracking-[0.15em] ${
+                <div className={`rounded-lg px-2 py-2 text-center ${
                   theme === 'dark'
-                    ? 'bg-gray-800 border border-gray-600 text-cyan-300'
-                    : 'bg-blue-50 border border-blue-200 text-blue-700'
+                    ? 'bg-gray-800 border border-gray-600'
+                    : 'bg-blue-50 border border-blue-200'
                 }`}>
-                  {captchaQuestion}
+                  {captchaImageUrl ? (
+                    <img
+                      src={captchaImageUrl}
+                      alt="CAPTCHA"
+                      className="mx-auto h-14 w-full max-w-[200px] object-contain"
+                    />
+                  ) : (
+                    <div className={`font-mono font-black tracking-[0.15em] ${theme === 'dark' ? 'text-cyan-300' : 'text-blue-700'}`}>
+                      {captchaQuestion}
+                    </div>
+                  )}
                 </div>
                 <button
                   type="button"
                   onClick={() => {
-                    loadCaptchaChallenge();
+                    loadCaptchaChallenge(true);
                     setCaptchaInput('');
                   }}
                   className={`rounded-lg px-3 transition-colors ${
@@ -417,14 +442,14 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
               <input
                 type="text"
                 value={captchaInput}
-                onChange={(e) => setCaptchaInput(e.target.value.replace(/[^0-9]/g, '').slice(0, 3))}
+                onChange={(e) => setCaptchaInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, captchaCodeLength))}
                 className={`w-full rounded-lg p-3 text-sm font-medium transition-all duration-200 ${
                   theme === 'dark'
                     ? 'bg-gray-800 border border-gray-600 text-white focus:outline-none focus:border-cyan-500 focus:shadow-lg focus:shadow-cyan-500/20'
                     : 'bg-gray-50 border border-gray-300 text-black focus:outline-none focus:border-cyan-500 focus:shadow-lg focus:shadow-cyan-500/10'
                 }`}
                 required
-                placeholder="Nhập kết quả CAPTCHA"
+                placeholder="Nhập mã trong hình"
               />
             </div>
             
@@ -444,7 +469,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onCancel, systemName, logoUrl, f
             </button>
 
             {allowRegistration && (
-                <div className={`text-center pt-2 border-t ${
+                <div className={`text-center pt-2 border-t mt-1 sm:mt-2 ${
                   theme === 'dark' ? 'border-gray-700' : 'border-gray-200'
                 }`}>
                     <p className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-600'} mb-2`}>Chưa có tài khoản?</p>

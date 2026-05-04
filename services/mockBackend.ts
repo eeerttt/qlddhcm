@@ -503,13 +503,22 @@ export const hasAnyPermission = (permissions: string[] = [], required: string | 
 
 export const authService = {
     // Sửa lại hàm login để lưu token
-    getCaptchaChallenge: async (): Promise<{ challengeId: string; question: string; expiresInSec: number }> => {
+    getCaptchaChallenge: async (): Promise<{ challengeId: string; question: string; imageDataUrl?: string; codeLength?: number; expiresInSec: number }> => {
         return apiCall('/auth/captcha-challenge');
     },
-    login: async (identifier: string, pass: string, captchaChallengeId: string, captchaAnswer: string): Promise<User> => {
+    refreshCaptcha: async (): Promise<{ challengeId: string; question: string; imageDataUrl?: string; codeLength?: number; expiresInSec: number }> => {
+        return apiCall('/auth/captcha-refresh');
+    },
+    verifyCaptcha: async (captchaChallengeId: string, captchaAnswer: string): Promise<{ captchaVerificationToken: string; expiresInSec: number }> => {
+        return apiCall('/auth/captcha-verify', {
+            method: 'POST',
+            body: JSON.stringify({ captchaChallengeId, captchaAnswer })
+        });
+    },
+    login: async (identifier: string, pass: string, captchaVerificationToken: string): Promise<User> => {
         const response = await apiCall('/auth/login', {
             method: 'POST',
-            body: JSON.stringify({ identifier, password: pass, captchaChallengeId, captchaAnswer })
+            body: JSON.stringify({ identifier, password: pass, captchaVerificationToken })
         });
         if (response.token) {
             localStorage.setItem('geo_token', response.token);

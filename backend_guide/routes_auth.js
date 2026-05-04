@@ -6,7 +6,15 @@ import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from './middleware_auth.js';
 
 const CAPTCHA_TTL_MS = 2 * 60 * 1000;
+const CAPTCHA_VERIFY_TOKEN_TTL_MS = 2 * 60 * 1000;
+const CAPTCHA_REFRESH_WINDOW_MS = 60 * 1000;
+const CAPTCHA_REFRESH_MAX_PER_WINDOW = 8;
+const CAPTCHA_REFRESH_BLOCK_MS = 2 * 60 * 1000;
 const captchaStore = new Map();
+const captchaVerificationStore = new Map();
+const captchaRefreshStore = new Map();
+const CAPTCHA_CODE_LENGTH = 5;
+const CAPTCHA_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MAX_FAILED_ATTEMPTS = 5;
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 const LOCK_DURATION_MS = 10 * 60 * 1000;
@@ -17,22 +25,77 @@ const generateOTP = () => {
     return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
+const generateCaptchaCode = (length = CAPTCHA_CODE_LENGTH) => {
+    let code = '';
+    for (let i = 0; i < length; i += 1) {
+        const randomIndex = Math.floor(Math.random() * CAPTCHA_CHARS.length);
+        code += CAPTCHA_CHARS[randomIndex];
+    }
+    return code;
+};
+
+const buildCaptchaSvg = (captchaText) => {
+    const width = 180;
+    const height = 56;
+    const chars = captchaText.split('');
+    const charSpacing = 28;
+    const leftPadding = 22;
+
+    const textNodes = chars.map((char, index) => {
+        const x = leftPadding + index * charSpacing + Math.floor(Math.random() * 4);
+        const y = 38 + Math.floor(Math.random() * 5) - 2;
+        const rotate = Math.floor(Math.random() * 30) - 15;
+        const color = ['#1d4ed8', '#0f766e', '#7c3aed', '#be123c'][Math.floor(Math.random() * 4)];
+        return `<text x="${x}" y="${y}" transform="rotate(${rotate} ${x} ${y})" font-size="30" font-family="Verdana, sans-serif" font-weight="700" fill="${color}">${char}</text>`;
+    }).join('');
+
+    const noiseLines = Array.from({ length: 6 }).map(() => {
+        const x1 = Math.floor(Math.random() * width);
+        const x2 = Math.floor(Math.random() * width);
+        const y1 = Math.floor(Math.random() * height);
+        const y2 = Math.floor(Math.random() * height);
+        const stroke = ['#93c5fd', '#a7f3d0', '#fbcfe8', '#fde68a'][Math.floor(Math.random() * 4)];
+        return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${stroke}" stroke-width="1.5" />`;
+    }).join('');
+
+    const noiseDots = Array.from({ length: 30 }).map(() => {
+        const cx = Math.floor(Math.random() * width);
+        const cy = Math.floor(Math.random() * height);
+        const r = Math.random() * 1.6 + 0.4;
+        return `<circle cx="${cx}" cy="${cy}" r="${r.toFixed(2)}" fill="#94a3b8" opacity="0.45" />`;
+    }).join('');
+
+    const svg = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="captcha">
+            <defs>
+                <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stop-color="#eff6ff" />
+                    <stop offset="100%" stop-color="#dbeafe" />
+                </linearGradient>
+            </defs>
+            <rect x="0" y="0" width="${width}" height="${height}" rx="10" ry="10" fill="url(#bg)" stroke="#bfdbfe" />
+            ${noiseLines}
+            ${noiseDots}
+            ${textNodes}
+        </svg>
+    `.trim();
+
+    return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+};
+
 const generateCaptchaChallenge = () => {
-    const first = Math.floor(Math.random() * 9) + 1;
-    const second = Math.floor(Math.random() * 9) + 1;
-    const usePlus = Math.random() > 0.5;
-    const left = usePlus ? first : Math.max(first, second);
-    const right = usePlus ? second : Math.min(first, second);
-    const answer = usePlus ? left + right : left - right;
-    const question = `${left} ${usePlus ? '+' : '-'} ${right} = ?`;
+    const captchaCode = generateCaptchaCode();
     const challengeId = crypto.randomUUID();
 
     captchaStore.set(challengeId, {
-        answer: String(answer),
+        answer: captchaCode.toLowerCase(),
         expiresAt: Date.now() + CAPTCHA_TTL_MS
     });
 
-    return { challengeId, question };
+    return {
+        challengeId,
+        imageDataUrl: buildCaptchaSvg(captchaCode)
+    };
 };
 
 const cleanupCaptchaStore = () => {
@@ -40,6 +103,24 @@ const cleanupCaptchaStore = () => {
     for (const [id, value] of captchaStore.entries()) {
         if (!value || value.expiresAt <= now) {
             captchaStore.delete(id);
+        }
+    }
+
+    for (const [token, value] of captchaVerificationStore.entries()) {
+        if (!value || value.expiresAt <= now) {
+            captchaVerificationStore.delete(token);
+        }
+    }
+
+    for (const [key, value] of captchaRefreshStore.entries()) {
+        if (!value) {
+            captchaRefreshStore.delete(key);
+            continue;
+        }
+        const windowExpired = !value.blockedUntil && now - (value.windowStartedAt || 0) > CAPTCHA_REFRESH_WINDOW_MS;
+        const blockExpired = value.blockedUntil && value.blockedUntil <= now;
+        if (windowExpired || blockExpired) {
+            captchaRefreshStore.delete(key);
         }
     }
 };
@@ -68,6 +149,53 @@ const getClientIp = (req) => {
 };
 
 const getAttemptKey = (req, identity) => `${String(identity || '').toLowerCase()}|${getClientIp(req)}`;
+
+
+const getRefreshRateLimitKey = (req) => `captcha-refresh|${getClientIp(req)}`;
+
+const createCaptchaVerificationToken = (req, challengeId) => {
+    const token = crypto.randomUUID();
+    captchaVerificationStore.set(token, {
+        challengeId,
+        clientIp: getClientIp(req),
+        expiresAt: Date.now() + CAPTCHA_VERIFY_TOKEN_TTL_MS
+    });
+    return token;
+};
+
+const checkCaptchaRefreshRateLimit = (req) => {
+    const now = Date.now();
+    const key = getRefreshRateLimitKey(req);
+    const current = captchaRefreshStore.get(key);
+
+    if (!current || !current.windowStartedAt || now - current.windowStartedAt > CAPTCHA_REFRESH_WINDOW_MS) {
+        captchaRefreshStore.set(key, { windowStartedAt: now, count: 1, blockedUntil: null });
+        return { allowed: true, retryAfterSec: 0 };
+    }
+
+    if (current.blockedUntil && current.blockedUntil > now) {
+        return { allowed: false, retryAfterSec: Math.ceil((current.blockedUntil - now) / 1000) };
+    }
+
+    const nextCount = (current.count || 0) + 1;
+    if (nextCount > CAPTCHA_REFRESH_MAX_PER_WINDOW) {
+        const blockedUntil = now + CAPTCHA_REFRESH_BLOCK_MS;
+        captchaRefreshStore.set(key, {
+            windowStartedAt: current.windowStartedAt,
+            count: nextCount,
+            blockedUntil
+        });
+        return { allowed: false, retryAfterSec: Math.ceil(CAPTCHA_REFRESH_BLOCK_MS / 1000) };
+    }
+
+    captchaRefreshStore.set(key, {
+        windowStartedAt: current.windowStartedAt,
+        count: nextCount,
+        blockedUntil: null
+    });
+
+    return { allowed: true, retryAfterSec: 0 };
+};
 
 const getLockRemainingSeconds = (attemptInfo) => {
     if (!attemptInfo?.lockedUntil) return 0;
@@ -210,55 +338,109 @@ const getHtmlTemplate = (systemName, title, greetingName, message, code) => {
 
 export default function(pool, logSystemAction) {
     const router = express.Router();
-
     // --- CAPTCHA CHALLENGE ---
     router.get('/captcha-challenge', async (req, res) => {
         cleanupCaptchaStore();
         const challenge = generateCaptchaChallenge();
         res.json({
             challengeId: challenge.challengeId,
-            question: challenge.question,
+            imageDataUrl: challenge.imageDataUrl,
+            question: 'Nhap ma trong hinh',
+            codeLength: CAPTCHA_CODE_LENGTH,
             expiresInSec: CAPTCHA_TTL_MS / 1000
         });
     });
 
+    // --- CAPTCHA REFRESH (RATE LIMITED) ---
+    router.get('/captcha-refresh', async (req, res) => {
+        cleanupCaptchaStore();
+        const rateLimit = checkCaptchaRefreshRateLimit(req);
+        if (!rateLimit.allowed) {
+            return res.status(429).json({
+                error: `Ban dang lam moi CAPTCHA qua nhanh. Vui long thu lai sau ${rateLimit.retryAfterSec} giay.`,
+                retryAfterSec: rateLimit.retryAfterSec
+            });
+        }
+
+        const challenge = generateCaptchaChallenge();
+        res.json({
+            challengeId: challenge.challengeId,
+            imageDataUrl: challenge.imageDataUrl,
+            question: 'Nhap ma trong hinh',
+            codeLength: CAPTCHA_CODE_LENGTH,
+            expiresInSec: CAPTCHA_TTL_MS / 1000
+        });
+    });
+
+    // --- CAPTCHA VERIFY ---
+    router.post('/captcha-verify', async (req, res) => {
+        const { captchaChallengeId, captchaAnswer } = req.body;
+        const submittedAnswer = String(captchaAnswer || '').trim().toLowerCase();
+
+        cleanupCaptchaStore();
+
+        const challenge = captchaStore.get(captchaChallengeId);
+        if (!captchaChallengeId || !challenge) {
+            return res.status(400).json({ error: "CAPTCHA khong hop le hoac da het han. Vui long thu lai." });
+        }
+
+        if (challenge.expiresAt <= Date.now()) {
+            captchaStore.delete(captchaChallengeId);
+            return res.status(400).json({ error: "CAPTCHA da het han. Vui long tai lai ma." });
+        }
+
+        if (!submittedAnswer || submittedAnswer !== challenge.answer) {
+            captchaStore.delete(captchaChallengeId);
+            return res.status(400).json({ error: "Ma CAPTCHA khong chinh xac." });
+        }
+
+        captchaStore.delete(captchaChallengeId);
+        const captchaVerificationToken = createCaptchaVerificationToken(req, captchaChallengeId);
+
+        res.json({
+            captchaVerificationToken,
+            expiresInSec: CAPTCHA_VERIFY_TOKEN_TTL_MS / 1000
+        });
+    });
     // --- LOGIN ---
     router.post('/login', async (req, res) => {
-        const { identifier, email, password, captchaChallengeId, captchaAnswer } = req.body;
+        const { identifier, email, password, captchaVerificationToken } = req.body;
         const identity = (identifier || email || '').trim();
-        const submittedAnswer = String(captchaAnswer || '').trim();
+
         cleanupLoginAttemptStore();
+        cleanupCaptchaStore();
+
         try {
             if (!identity) {
-                return res.status(400).json({ error: "Vui lòng nhập email hoặc tên tài khoản." });
+                return res.status(400).json({ error: "Vui long nhap email hoac ten tai khoan." });
             }
 
             const attemptKey = getAttemptKey(req, identity);
             const attemptInfo = loginAttemptStore.get(attemptKey);
             if (attemptInfo?.lockedUntil && attemptInfo.lockedUntil > Date.now()) {
                 const remainingSec = getLockRemainingSeconds(attemptInfo);
-                return res.status(429).json({ error: `Đăng nhập bị tạm khóa. Vui lòng thử lại sau ${remainingSec} giây.` });
+                return res.status(429).json({ error: `Dang nhap bi tam khoa. Vui long thu lai sau ${remainingSec} giay.` });
             }
 
-            const challenge = captchaStore.get(captchaChallengeId);
-            if (!captchaChallengeId || !challenge) {
+            if (!captchaVerificationToken) {
                 recordFailedAttempt(attemptKey);
-                return res.status(400).json({ error: "CAPTCHA không hợp lệ hoặc đã hết hạn. Vui lòng thử lại." });
+                return res.status(400).json({ error: "Vui long xac thuc CAPTCHA truoc khi dang nhap." });
             }
 
-            if (challenge.expiresAt <= Date.now()) {
-                captchaStore.delete(captchaChallengeId);
+            const verifyInfo = captchaVerificationStore.get(captchaVerificationToken);
+            if (!verifyInfo || verifyInfo.expiresAt <= Date.now()) {
+                captchaVerificationStore.delete(captchaVerificationToken);
                 recordFailedAttempt(attemptKey);
-                return res.status(400).json({ error: "CAPTCHA đã hết hạn. Vui lòng tải lại mã." });
+                return res.status(400).json({ error: "Phien xac thuc CAPTCHA khong hop le hoac da het han." });
             }
 
-            if (submittedAnswer !== challenge.answer) {
-                captchaStore.delete(captchaChallengeId);
+            if (verifyInfo.clientIp && verifyInfo.clientIp !== getClientIp(req)) {
+                captchaVerificationStore.delete(captchaVerificationToken);
                 recordFailedAttempt(attemptKey);
-                return res.status(400).json({ error: "Mã CAPTCHA không chính xác." });
+                return res.status(400).json({ error: "Xac thuc CAPTCHA khong khop thiet bi hoac ket noi." });
             }
 
-            captchaStore.delete(captchaChallengeId);
+            captchaVerificationStore.delete(captchaVerificationToken);
 
             const result = await pool.query(
                 `SELECT * FROM users WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1) OR LOWER(name) = LOWER($1) LIMIT 1`,
@@ -270,22 +452,22 @@ export default function(pool, logSystemAction) {
                 const failed = recordFailedAttempt(attemptKey);
                 if (failed.lockedUntil) {
                     const remainingSec = getLockRemainingSeconds(failed);
-                    return res.status(429).json({ error: `Bạn đã nhập sai quá nhiều lần. Khóa tạm thời ${remainingSec} giây.` });
+                    return res.status(429).json({ error: `Ban da nhap sai qua nhieu lan. Khoa tam thoi ${remainingSec} giay.` });
                 }
-                return res.status(401).json({ error: "Email/Tên tài khoản hoặc mật khẩu không đúng." });
+                return res.status(401).json({ error: "Email/ten tai khoan hoac mat khau khong dung." });
             }
 
             loginAttemptStore.delete(attemptKey);
 
             if (user.is_verified === false) {
-                return res.status(403).json({ error: "Tài khoản chưa kích hoạt. Vui lòng kiểm tra email lấy mã xác thực." });
+                return res.status(403).json({ error: "Tai khoan chua kich hoat. Vui long kiem tra email lay ma xac thuc." });
             }
 
             const userData = {
                 id: user.id, email: user.email, username: user.username, name: user.name,
                 role: user.role, branchId: user.branch_id, avatar: user.avatar
             };
-            
+
             // Generate JWT Token
             const token = jwt.sign(
                 { id: user.id, role: user.role, branchId: user.branch_id },
@@ -293,9 +475,9 @@ export default function(pool, logSystemAction) {
                 { expiresIn: '24h' }
             );
 
-            await logSystemAction(req, 'LOGIN', `Đăng nhập thành công`, userData);
-            
-            // Trả về cả user info và token
+            await logSystemAction(req, 'LOGIN', 'Dang nhap thanh cong', userData);
+
+            // Return both user info and token
             res.json({ user: userData, token });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
