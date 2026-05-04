@@ -115,7 +115,7 @@ const LandPriceLookup: React.FC<LandPriceLookupProps> = ({ user, systemSettings 
                 pages: response.pages
             });
         } catch (err: any) {
-            setError(err.message || "Loi khi tra cuu du lieu.");
+            setError(err.message || "L?i khi tra c?u d? li?u.");
             setResults([]);
             setPagination((prev) => ({ ...prev, page: 1, limit: pageSize, total: 0, pages: 0 }));
         } finally {
@@ -139,7 +139,7 @@ const LandPriceLookup: React.FC<LandPriceLookupProps> = ({ user, systemSettings 
 
         const hasFilter = Object.values(nextFilters).some((value) => value);
         if (!hasFilter) {
-            setError('Vui long nhap it nhat mot dieu kien tra cuu.');
+            setError('Vui l?ng nh?p ?t nh?t m?t ?i?u ki?n tra c?u.');
             setResults([]);
             setHasSearched(false);
             setPagination((prev) => ({ ...prev, page: 1, limit: pageSize, total: 0, pages: 0 }));
@@ -345,7 +345,7 @@ const LandPriceLookup: React.FC<LandPriceLookupProps> = ({ user, systemSettings 
                                 {isPageTransition && (
                                     <div className="px-2 text-[10px] text-emerald-400 font-bold uppercase tracking-wider flex items-center gap-2">
                                         <RefreshCw size={12} className="animate-spin" />
-                                        Dang tai trang du lieu...
+                                        {'\u0110ang t\u1ea3i trang d\u1eef li\u1ec7u...'}
                                     </div>
                                 )}
                                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between px-2">
@@ -369,7 +369,7 @@ const LandPriceLookup: React.FC<LandPriceLookupProps> = ({ user, systemSettings 
                                             disabled={disablePaging || pagination.page <= 1}
                                             className="px-3 py-2 rounded-xl border border-slate-700 text-slate-300 text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
                                         >
-                                            Trang dau
+                                            {'Trang \u0111\u1ea7u'}
                                         </button>
                                         <button
                                             type="button"
@@ -393,7 +393,7 @@ const LandPriceLookup: React.FC<LandPriceLookupProps> = ({ user, systemSettings 
                                             disabled={disablePaging || pagination.page >= pagination.pages}
                                             className="px-3 py-2 rounded-xl border border-slate-700 text-slate-300 text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
                                         >
-                                            Trang cuoi
+                                            {'Trang cu\u1ed1i'}
                                         </button>
                                         <input
                                             type="number"
