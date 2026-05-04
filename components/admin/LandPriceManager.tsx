@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useEffect } from 'react';
 import { adminService, hasAnyPermission } from '../../services/mockBackend';
 import { LandPrice2026 } from '../../types';
@@ -14,6 +14,8 @@ const LandPrice2026Manager: React.FC<LandPrice2026ManagerProps> = ({ permissions
     const [data, setData] = useState<LandPrice2026[]>([]);
     const [loading, setLoading] = useState(false);
     const [hasSearched, setHasSearched] = useState(false);
+    const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, pages: 0 });
+    const [pageSize, setPageSize] = useState(50);
     
     // Search Filters
     const [phuongxa, setPhuongxa] = useState('');
@@ -65,16 +67,43 @@ const LandPrice2026Manager: React.FC<LandPrice2026ManagerProps> = ({ permissions
         return () => clearTimeout(timer);
     }, [phuongxa]);
 
-    const handleSearch = async () => {
+    const runSearch = async (page = 1, overridePageSize?: number) => {
+        const nextLimit = overridePageSize || pageSize;
         setLoading(true);
         setHasSearched(true);
         try {
-            const results = await adminService.searchLandPrices2026(phuongxa, tenduong, undefined, undefined, { limit: 300 });
-            setData(results);
+            const response = await adminService.searchLandPrices2026(phuongxa, tenduong, undefined, undefined, {
+                limit: nextLimit,
+                page
+            });
+            setData(response.data);
+            setPagination({
+                page: response.page,
+                limit: response.limit,
+                total: response.total,
+                pages: response.pages
+            });
         } catch (e) {
             console.error(e);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleSearch = async () => {
+        await runSearch(1);
+    };
+
+    const handlePageChange = async (nextPage: number) => {
+        if (loading || nextPage < 1 || nextPage > pagination.pages) return;
+        await runSearch(nextPage);
+    };
+
+    const handlePageSizeChange = async (nextSize: number) => {
+        setPageSize(nextSize);
+        setPagination((prev) => ({ ...prev, limit: nextSize }));
+        if (hasSearched) {
+            await runSearch(1, nextSize);
         }
     };
 
@@ -210,11 +239,39 @@ const LandPrice2026Manager: React.FC<LandPrice2026ManagerProps> = ({ permissions
                             <div className="bg-amber-500/20 p-2 rounded-lg"><Coins className="text-amber-500" size={18} /></div>
                             <div>
                                 <span className="font-bold text-gray-200 block leading-none">Kết quả lọc dữ liệu</span>
-                                <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mt-1">Tìm thấy {data.length} bản ghi</span>
+                                <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mt-1">Tong {pagination.total} ban ghi</span>
                             </div>
                         </div>
                     </div>
-                    
+
+                    <div className="px-5 pb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3 text-[10px]">
+                        <div className="text-gray-500 font-bold uppercase tracking-wider">
+                            Trang {pagination.page} / {Math.max(pagination.pages, 1)} - Hien thi {data.length} / {pagination.total}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <label className="text-gray-500 font-bold uppercase tracking-wider">So dong/trang</label>
+                            <select
+                                value={pageSize}
+                                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                                className="bg-gray-900 border border-gray-700 text-gray-200 rounded-lg px-2 py-1.5"
+                            >
+                                <option value={20}>20</option>
+                                <option value={50}>50</option>
+                                <option value={100}>100</option>
+                            </select>
+                            <button
+                                onClick={() => handlePageChange(pagination.page - 1)}
+                                disabled={loading || pagination.page <= 1}
+                                className="px-3 py-1.5 rounded-lg border border-gray-700 text-gray-300 font-black uppercase tracking-wider disabled:opacity-40"
+                            >Truoc</button>
+                            <button
+                                onClick={() => handlePageChange(pagination.page + 1)}
+                                disabled={loading || pagination.page >= pagination.pages}
+                                className="px-3 py-1.5 rounded-lg border border-gray-700 text-gray-300 font-black uppercase tracking-wider disabled:opacity-40"
+                            >Sau</button>
+                        </div>
+                    </div>
+
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm text-left">
                             <thead className="bg-gray-900 text-gray-400 uppercase text-[10px] font-black tracking-widest border-b border-gray-700">
@@ -356,3 +413,4 @@ const LandPrice2026Manager: React.FC<LandPrice2026ManagerProps> = ({ permissions
 };
 
 export default LandPrice2026Manager;
+

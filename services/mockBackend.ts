@@ -1,5 +1,5 @@
 
-import { User, UserRole, Branch, LandParcel, DashboardStats, SystemLog, LandPriceConfig, WMSLayerConfig, SystemSetting, RoleConfig, PermissionDefinition, BasemapConfig, MenuItem, Message, SystemNotification, LandPrice2026 } from '../types';
+import { User, UserRole, Branch, LandParcel, DashboardStats, SystemLog, LandPriceConfig, WMSLayerConfig, SystemSetting, RoleConfig, PermissionDefinition, BasemapConfig, MenuItem, Message, SystemNotification, LandPrice2026, LandPriceSearchResult } from '../types';
 
 const PRODUCTION_API_URL = 'https://api.datdaihcm.pro';
 
@@ -318,16 +318,42 @@ export const adminService = {
         tenduong: string,
         tu?: string,
         den?: string,
-        options?: { limit?: number; tinhcu?: string }
-    ): Promise<LandPrice2026[]> => {
-        let qs = `?t=${Date.now()}`;
+        options?: { limit?: number; page?: number; tinhcu?: string }
+    ): Promise<LandPriceSearchResult> => {
+        const page = Math.max(1, Math.floor(options?.page || 1));
+        const limit = Math.max(1, Math.min(500, Math.floor(options?.limit || 50)));
+
+        let qs = `?t=${Date.now()}&page=${page}&limit=${limit}`;
         if (phuongxa) qs += `&phuongxa=${encodeURIComponent(phuongxa)}`;
         if (options?.tinhcu) qs += `&tinhcu=${encodeURIComponent(options.tinhcu)}`;
         if (tenduong) qs += `&tenduong=${encodeURIComponent(tenduong)}`;
         if (tu) qs += `&tu=${encodeURIComponent(tu)}`;
         if (den) qs += `&den=${encodeURIComponent(den)}`;
-        if (options?.limit) qs += `&limit=${Math.max(1, Math.min(500, Math.floor(options.limit)))}`;
-        return await apiCall(`/land-prices-2026/search${qs}`);
+
+        const response = await apiCall(`/land-prices-2026/search${qs}`);
+
+        // Backward compatibility: n?u backend c? tr? array th? b?c th?nh c?u tr?c ph?n trang.
+        if (Array.isArray(response)) {
+            return {
+                data: response,
+                total: response.length,
+                page: 1,
+                limit: response.length || limit,
+                pages: response.length > 0 ? 1 : 0
+            };
+        }
+
+        const data = Array.isArray(response?.data) ? response.data : [];
+        const total = Number(response?.total || 0);
+        const responseLimit = Number(response?.limit || limit) || limit;
+
+        return {
+            data,
+            total,
+            page: Number(response?.page || page) || page,
+            limit: responseLimit,
+            pages: Number(response?.pages || (total > 0 ? Math.ceil(total / responseLimit) : 0))
+        };
     },
     // Các phương thức quản trị mới
     addLandPrice2026: async (data: any) => apiCall('/land-prices-2026', { method: 'POST', body: JSON.stringify(data) }),

@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useEffect } from 'react';
 import { adminService } from '../services/mockBackend';
 import { LandPrice2026, User } from '../types';
@@ -28,6 +28,10 @@ const LandPriceLookup: React.FC<LandPriceLookupProps> = ({ user, systemSettings 
     const [loading, setLoading] = useState(false);
     const [hasSearched, setHasSearched] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, pages: 0 });
+    const [appliedFilters, setAppliedFilters] = useState({ phuongxa: '', tenduong: '', tu: '', den: '' });
+    const [pageSize, setPageSize] = useState(50);
+    const [gotoPage, setGotoPage] = useState('');
 
     // Detail Modal State
     const [selectedRow, setSelectedRow] = useState<LandPrice2026 | null>(null);
@@ -58,29 +62,81 @@ const LandPriceLookup: React.FC<LandPriceLookupProps> = ({ user, systemSettings 
         updateSuggestions();
     }, [phuongxa]);
 
-    const handleSearch = async (e: React.FormEvent) => {
-        e.preventDefault();
-
-        const hasFilter = [phuongxa, tenduong, tu, den].some((value) => value.trim());
-        if (!hasFilter) {
-            setError('Vui long nhap it nhat mot dieu kien tra cuu.');
-            setResults([]);
-            setHasSearched(false);
-            return;
-        }
-
+    const runSearch = async (
+        filters: { phuongxa: string; tenduong: string; tu: string; den: string },
+        page = 1,
+        overridePageSize?: number
+    ) => {
+        const nextLimit = overridePageSize || pageSize;
         setLoading(true);
         setError(null);
         setHasSearched(true);
         try {
-            const data = await adminService.searchLandPrices2026(phuongxa, tenduong, tu, den, { limit: 200 });
-            setResults(data);
+            const response = await adminService.searchLandPrices2026(
+                filters.phuongxa,
+                filters.tenduong,
+                filters.tu,
+                filters.den,
+                { limit: nextLimit, page }
+            );
+            setResults(response.data);
+            setPagination({
+                page: response.page,
+                limit: response.limit,
+                total: response.total,
+                pages: response.pages
+            });
         } catch (err: any) {
             setError(err.message || "Loi khi tra cuu du lieu.");
             setResults([]);
+            setPagination((prev) => ({ ...prev, page: 1, limit: pageSize, total: 0, pages: 0 }));
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleSearch = async (e: React.FormEvent) => {
+        e.preventDefault();
+
+        const nextFilters = {
+            phuongxa: phuongxa.trim(),
+            tenduong: tenduong.trim(),
+            tu: tu.trim(),
+            den: den.trim()
+        };
+
+        const hasFilter = Object.values(nextFilters).some((value) => value);
+        if (!hasFilter) {
+            setError('Vui long nhap it nhat mot dieu kien tra cuu.');
+            setResults([]);
+            setHasSearched(false);
+            setPagination((prev) => ({ ...prev, page: 1, limit: pageSize, total: 0, pages: 0 }));
+            return;
+        }
+
+        setAppliedFilters(nextFilters);
+        await runSearch(nextFilters, 1);
+    };
+
+    const handlePageChange = async (nextPage: number) => {
+        if (loading || nextPage < 1 || nextPage > pagination.pages) return;
+        await runSearch(appliedFilters, nextPage);
+    };
+
+    const handlePageSizeChange = async (nextSize: number) => {
+        setPageSize(nextSize);
+        setPagination((prev) => ({ ...prev, limit: nextSize }));
+        if (hasSearched) {
+            await runSearch(appliedFilters, 1, nextSize);
+        }
+    };
+
+    const handleJumpPage = async () => {
+        const target = Math.floor(Number(gotoPage));
+        if (!Number.isFinite(target)) return;
+        const safePage = Math.max(1, Math.min(pagination.pages || 1, target));
+        setGotoPage(String(safePage));
+        await handlePageChange(safePage);
     };
 
     return (
@@ -181,7 +237,7 @@ const LandPriceLookup: React.FC<LandPriceLookupProps> = ({ user, systemSettings 
                                     <div>
                                         <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
                                             <Info size={16} className="text-blue-400"/>
-                                            Kết quả tìm kiếm ({results.length})
+                                            Kết quả tìm kiếm ({pagination.total})
                                         </h3>
                                         <div className="mt-1 flex items-center gap-1.5 text-amber-400">
                                             <Coins size={12}/>
@@ -242,6 +298,56 @@ const LandPriceLookup: React.FC<LandPriceLookupProps> = ({ user, systemSettings 
                                         </table>
                                     </div>
                                 </div>
+                                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between px-2">
+                                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                                        Trang {pagination.page} / {Math.max(pagination.pages, 1)} - Hien thi {results.length} / {pagination.total} ban ghi
+                                    </span>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">So dong/trang</label>
+                                        <select
+                                            value={pageSize}
+                                            onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                                            className="bg-slate-900 border border-slate-700 text-slate-200 text-[11px] rounded-lg px-2 py-2"
+                                        >
+                                            <option value={20}>20</option>
+                                            <option value={50}>50</option>
+                                            <option value={100}>100</option>
+                                        </select>
+                                        <button
+                                            type="button"
+                                            onClick={() => handlePageChange(pagination.page - 1)}
+                                            disabled={loading || pagination.page <= 1}
+                                            className="px-4 py-2 rounded-xl border border-slate-700 text-slate-300 text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                                        >
+                                            Trang truoc
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handlePageChange(pagination.page + 1)}
+                                            disabled={loading || pagination.page >= pagination.pages}
+                                            className="px-4 py-2 rounded-xl border border-slate-700 text-slate-300 text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                                        >
+                                            Trang sau
+                                        </button>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            max={Math.max(pagination.pages, 1)}
+                                            value={gotoPage}
+                                            onChange={(e) => setGotoPage(e.target.value)}
+                                            placeholder="Trang"
+                                            className="w-20 bg-slate-900 border border-slate-700 text-slate-200 text-[11px] rounded-lg px-2 py-2"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={handleJumpPage}
+                                            disabled={loading || pagination.pages <= 1}
+                                            className="px-3 py-2 rounded-xl border border-slate-700 text-slate-300 text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                                        >
+                                            Den trang
+                                        </button>
+                                    </div>
+                                </div>
                                 <p className="text-[10px] text-slate-600 italic mt-2 px-2">* Nhấp vào từng dòng để xem chi tiết tính toán giá đất cho các vị trí hẻm.</p>
                             </div>
                         ) : null}
@@ -263,3 +369,4 @@ const LandPriceLookup: React.FC<LandPriceLookupProps> = ({ user, systemSettings 
 };
 
 export default LandPriceLookup;
+

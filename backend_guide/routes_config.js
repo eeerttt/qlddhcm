@@ -142,49 +142,74 @@ export default function(pool, logSystemAction) {
     });
 
 
-    // Tim kiem gia dat mo rong
+    // Tim kiem gia dat mo rong (co phan trang)
     router.get('/land-prices-2026/search', async (req, res) => {
         const { phuongxa, tinhcu } = parseWardLabel(req.query.phuongxa, req.query.tinhcu);
-        const { tenduong, tu, den } = req.query;
-        const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 200));
+        const tenduong = String(req.query.tenduong || '').trim();
+        const tu = String(req.query.tu || '').trim();
+        const den = String(req.query.den || '').trim();
+
+        const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+        const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit || '50'), 10) || 50));
+        const offset = (page - 1) * limit;
 
         try {
-            let query = `SELECT * FROM bang_gia_dat_2026 WHERE 1=1`;
+            const filters = [];
             const params = [];
             let idx = 1;
 
             if (phuongxa) {
-                query += ` AND phuongxa = $${idx++}`;
+                filters.push(`phuongxa = $${idx++}`);
                 params.push(phuongxa);
             }
             if (tinhcu) {
-                query += ` AND tinhcu = $${idx++}`;
+                filters.push(`tinhcu = $${idx++}`);
                 params.push(tinhcu);
             }
             if (tenduong) {
-                query += ` AND tenduong ILIKE $${idx++}`;
+                filters.push(`tenduong ILIKE $${idx++}`);
                 params.push(`%${tenduong}%`);
             }
             if (tu) {
-                query += ` AND tu ILIKE $${idx++}`;
+                filters.push(`tu ILIKE $${idx++}`);
                 params.push(`%${tu}%`);
             }
             if (den) {
-                query += ` AND den ILIKE $${idx++}`;
+                filters.push(`den ILIKE $${idx++}`);
                 params.push(`%${den}%`);
             }
 
-            query += ` ORDER BY tinhcu ASC, phuongxa ASC, tenduong ASC, tu ASC LIMIT $${idx}`;
-            params.push(limit);
+            const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : 'WHERE 1=1';
 
-            const result = await pool.query(query, params);
-            res.set('X-Search-Limit', String(limit));
-            res.json(result.rows);
+            const countQuery = `SELECT COUNT(*)::int AS total FROM bang_gia_dat_2026 ${whereClause}`;
+            const dataQuery = `
+                SELECT * FROM bang_gia_dat_2026
+                ${whereClause}
+                ORDER BY tinhcu ASC, phuongxa ASC, tenduong ASC, tu ASC
+                LIMIT $${idx} OFFSET $${idx + 1}
+            `;
+
+            const [countResult, dataResult] = await Promise.all([
+                pool.query(countQuery, params),
+                pool.query(dataQuery, [...params, limit, offset])
+            ]);
+
+            const total = Number(countResult.rows?.[0]?.total || 0);
+            const pages = total > 0 ? Math.ceil(total / limit) : 0;
+
+            res.json({
+                data: dataResult.rows,
+                total,
+                page,
+                limit,
+                pages
+            });
         } catch (e) {
             if (e.code === '42P01') return res.status(404).json({ error: "Bang gia dat 2026 chua duoc khoi tao." });
             res.status(500).json({ error: e.message });
         }
     });
+
     // Admin APIs for Land Price 2026
     router.post('/land-prices-2026', authenticateToken, async (req, res) => {
         const { phuongxa, tenduong, tinhcu, tu, den, dato, dattmdv, datsxkdpnn, nam_ap_dung, nguon_du_lieu, ghi_chu } = req.body;

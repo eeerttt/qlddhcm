@@ -99,6 +99,14 @@ export interface LandPrice2026 {
     updated_at?: string;
 }
 
+export interface LandPriceSearchResult {
+    data: LandPrice2026[];
+    total: number;
+    page: number;
+    limit: number;
+    pages: number;
+}
+
 export interface DashboardStats {
   totalParcels: number;
   totalArea: number;
